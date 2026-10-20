@@ -43,7 +43,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
-import android.widget.TextClock;
 import android.widget.TextView;
 
 import java.io.File;
@@ -73,9 +72,15 @@ public class MainActivity extends Activity {
     private static final String PLAY_STORE = "com.android.vending";
     private static final String SETTINGS = "settings";
     private static final String ADD = "add";
+    // AdGuard DNS on or off: switches the TV's Private DNS. Needs WRITE_SECURE_SETTINGS (see README).
+    private static final String ADGUARD = "adguard";
+    // Opens a list of every installed app.
+    private static final String ALL_APPS = "allapps";
+    private static final String ADGUARD_HOST = "dns.adguard-dns.com";
     private static final String[] EDIT_ITEMS = {"Move", "Replace", "Remove from home", "Uninstall"};
     private static final String[] EDIT_ITEMS_SYSTEM = {"Move", "Replace", "Remove from home", "App info"};
     private static final int PER_ROW = 6, MAX_INPUTS = 4;
+    private static final String PINNED_INPUT = "/HW6"; // HDMI 3 on this TV: first tile, first focus
 
     // Settings shortcuts: name, label, icon. Tile keys are QUICK + name.
     private static final String QUICK = "quick:";
@@ -89,8 +94,10 @@ public class MainActivity extends Activity {
 
     // Layout is designed at 1920x1080 and scaled to the TV's real UI size by px().
     private static final int MARGIN = 96, GAP = 36, RADIUS = 22;
-    private static final int ROW1_TOP = 604, ROW_STEP = 224;
-    private static final int GRID_MIN_TOP = 400; // more rows push the grid up, but not into the clock
+    private static final int ROW_STEP = 224;
+    // Under the weather (WeatherUi.BELOW): the orange HDMI 3 button and the two info tiles, then the
+    // shortcut row (Play Store, other inputs, Settings, Add app), then the apps. More rows scroll.
+    private static final int BUTTON_TOP = WeatherUi.BELOW, BUTTON_H = 140, SHORTCUT_TOP = 620;
     private static final int ICON_TOP = 76, ICON_BUTTON = 72, ICON_SIZE = 40, ICON_GAP = 12; // level with the date
     private float scale = 1f;
 
@@ -102,9 +109,18 @@ public class MainActivity extends Activity {
     private boolean dirty = true;
     private java.util.Locale shownLocale; // the TV's language (and region) when the page was built
     private String focusedKey;
+    private String accentKey; // the big orange TV button
     private final List<String> rowApps = new ArrayList<>(); // the top row as shown, in order
     private String movingKey;   // the app being moved with left/right, if any
     private TextView moveHint;  // shown above the apps while moving
+    private WeatherUi weather;  // clock, Tamil date, forecast and info tiles
+    private View festivalTile, tamilTile;
+    private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
+    // Every minute: the date lines (so they turn over at midnight) and a forecast download when due.
+    private final Runnable tick = () -> {
+        refreshDay();
+        ticker.postDelayed(this.tick, 60 * 1000L);
+    };
     private boolean longPressed; // OK was held: swallow the key-up so the app doesn't open
 
     private final BroadcastReceiver packagesChanged = new BroadcastReceiver() {
@@ -116,7 +132,10 @@ public class MainActivity extends Activity {
     private ImageView netIcon;
     private int netState = -1;
     private final ConnectivityManager.NetworkCallback networkChanged = new ConnectivityManager.NetworkCallback() {
-        @Override public void onAvailable(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
+        @Override public void onAvailable(Network n) {
+            runOnUiThread(MainActivity.this::refreshNetwork);
+            runOnUiThread(MainActivity.this::fetchWeather); // back online: try the forecast again
+        }
         @Override public void onLost(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
         // Also fires when the Wi-Fi signal gets stronger or weaker.
         @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities c) {
@@ -141,25 +160,26 @@ public class MainActivity extends Activity {
         root.setClipChildren(false);
         scroller.addView(root, new FrameLayout.LayoutParams(-1, -2));
 
-        LinearLayout clock = new LinearLayout(this);
-        clock.setOrientation(LinearLayout.VERTICAL);
         shownLocale = java.util.Locale.getDefault();
-        String day = Strings.datePattern();
-        TextClock date = clock(day, day, px(30), 0xA8FFFFFF, regular);
-        TextClock time = clock("h:mm", "H:mm", px(176), Color.WHITE, semibold);
-        time.setLetterSpacing(-0.028f);
-        time.setFontFeatureSettings("tnum");
-        time.setIncludeFontPadding(false);
-        clock.addView(date);
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
-        tp.topMargin = px(-20); // pull the big digits up under the date
-        clock.addView(time, tp);
-        root.addView(clock, at(px(MARGIN), px(92), -2, -2));
+        // Clock with the English and Tamil date, rain banner and day cards, then the info tiles
+        // (placed by buildTiles, next to the HDMI 3 button). See WeatherUi.
+        int width = getResources().getDisplayMetrics().widthPixels;
+        weather = new WeatherUi(this, scale, regular, semibold);
+        weather.addHeader(root, px(MARGIN));
+        weather.addWeather(root, px(MARGIN), width - 2 * px(MARGIN));
+        festivalTile = weather.festivalTile();
+        tamilTile = weather.tamilTile();
+        root.addView(festivalTile, at(0, 0, 1, 1));
+        root.addView(tamilTile, at(0, 0, 1, 1));
+        weather.refreshCalendar();
+        weather.showForecast(Weather.load(this));
 
-        moveHint = text(px(24), 0xA8FFFFFF, regular);
+        moveHint = text(px(22), 0xA8FFFFFF, regular);
         moveHint.setText(Strings.t("Use the arrows to move it, then press OK"));
+        moveHint.setSingleLine(true);
+        moveHint.setGravity(Gravity.CENTER_VERTICAL);
         moveHint.setVisibility(View.GONE);
-        root.addView(moveHint, at(px(MARGIN), px(ROW1_TOP - 64), -2, -2));
+        root.addView(moveHint, at(px(MARGIN), 0, -2, px(GAP)));
 
         setContentView(scroller);
 
@@ -179,7 +199,24 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        ticker.removeCallbacks(tick);
+        super.onPause();
+    }
+
+    // Date lines, info tiles, and a forecast download when the saved one is 30 minutes old.
+    private void refreshDay() {
+        try { weather.refreshCalendar(); } catch (Throwable ignored) {}
+        fetchWeather();
+    }
+
+    private void fetchWeather() {
+        try { Weather.maybeFetch(this, () -> weather.showForecast(Weather.load(this))); } catch (Throwable ignored) {}
+    }
+
+    @Override
     protected void onDestroy() {
+        ticker.removeCallbacks(tick);
         unregisterReceiver(packagesChanged);
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) try { cm.unregisterNetworkCallback(networkChanged); } catch (Exception ignored) {}
@@ -251,6 +288,8 @@ public class MainActivity extends Activity {
             buildTiles();
         }
         refreshNetwork();
+        ticker.removeCallbacks(tick);
+        tick.run();
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
     }
@@ -267,12 +306,12 @@ public class MainActivity extends Activity {
 
     // Static warm gradient, drawn once by the window: no extra view, no animation.
     private Drawable background() {
+        // Deep blue, as in the approved mockup, with a lighter glow at the top left.
         GradientDrawable base = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xFF15100F, 0xFF0A0809, 0xFF050405});
-        GradientDrawable warm = radial(0x36FF8048, 0.08f, -0.12f, px(1250));
-        GradientDrawable plum = radial(0x2EAA3C8C, 1.0f, 1.1f, px(1000));
-        for (GradientDrawable g : new GradientDrawable[] {base, warm, plum}) g.setDither(true);
-        return new LayerDrawable(new Drawable[] {base, warm, plum});
+                new int[] {0xFF101A2E, 0xFF0D1626, 0xFF0B1220});
+        GradientDrawable glow = radial(0xFF1B2F55, 0.1f, 0f, px(1200));
+        for (GradientDrawable g : new GradientDrawable[] {base, glow}) g.setDither(true);
+        return new LayerDrawable(new Drawable[] {base, glow});
     }
 
     private static GradientDrawable radial(int color, float cx, float cy, float r) {
@@ -306,15 +345,60 @@ public class MainActivity extends Activity {
         tileH = h;
 
         List<String> apps = appList(pm);
-        // Apps fill rows of six. With more rows the grid starts higher, so up to two rows of apps and
-        // the bottom row still fit on screen; past that the page scrolls.
+        // Apps fill rows of six under the shortcut row; once they don't all fit, the page scrolls.
         int launchable = 0;
         for (String pkg : apps) if (launchIntent(pm, pkg) != null) launchable++;
         int rows = Math.max(1, (launchable + PER_ROW - 1) / PER_ROW);
-        gridTop = Math.max(px(GRID_MIN_TOP), px(ROW1_TOP) - (rows - 1) * px(ROW_STEP));
-        int bottomTop = gridTop + rows * px(ROW_STEP);
-        ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
-        root.setMinimumHeight(bottomTop + h + px(MARGIN));
+        int shortcutTop = px(SHORTCUT_TOP);
+        boolean store = !apps.contains(PLAY_STORE) && launchIntent(pm, PLAY_STORE) != null;
+        List<TvInputInfo> inputs = new ArrayList<>(hdmiInputs());
+        TvInputInfo pinned = null;
+        for (TvInputInfo in : inputs) if (in.getId().endsWith(PINNED_INPUT)) pinned = in;
+        if (pinned != null) inputs.remove(pinned);
+        // Other HDMI inputs get a shortcut row under the button; without them the apps move up.
+        gridTop = inputs.isEmpty() ? shortcutTop : shortcutTop + h + px(GAP);
+        // Play Store, Settings and Add app sit in a footer after the last row of apps.
+        int footerTop = gridTop + rows * px(ROW_STEP);
+        ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(GAP);
+        root.setMinimumHeight(footerTop + h + px(MARGIN));
+
+        // Under the weather: a big orange "Switch to HDMI 3" button first (it takes first focus), then
+        // the next festival and the next Tamil day. Without HDMI 3 the two tiles share the row.
+        int bh = px(BUTTON_H), by = px(BUTTON_TOP), half = 3 * w + 2 * g;
+        int x = m;
+        if (pinned != null) {
+            int bw = 2 * w + g;
+            accentKey = pinned.getId();
+            addTile(root, pinned.getId(), "Switch to " + inputLabel(pinned), null, LineIcon.HDMI, null, x, by, bw, bh);
+            x += bw + g;
+            place(festivalTile, x, by, bw, bh);
+            place(tamilTile, x + bw + g, by, bw, bh);
+        } else {
+            place(festivalTile, x, by, half, bh);
+            place(tamilTile, x + half + g, by, half, bh);
+        }
+
+        // Shortcut row: the other HDMI inputs, if this TV has any.
+        if (inputs.size() > PER_ROW) inputs = inputs.subList(0, PER_ROW);
+        x = m;
+        for (TvInputInfo in : inputs) {
+            addTile(root, in.getId(), inputLabel(in), null, LineIcon.HDMI, null, x, shortcutTop, w, h);
+            x += w + g;
+        }
+
+        // Footer after the last row of apps: Play Store, Settings and Add app.
+        x = m;
+        if (store) {
+            addTile(root, PLAY_STORE, "Play Store", null, LineIcon.PLAY, null, x, footerTop, w, h);
+            x += w + g;
+        }
+        addTile(root, ADGUARD, adGuardOn() ? "AdGuard: On" : "AdGuard: Off", null, LineIcon.SETTINGS, null, x, footerTop, w, h);
+        x += w + g;
+        addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, x, footerTop, w, h);
+        x += w + g;
+        addTile(root, ALL_APPS, "All apps", null, LineIcon.APPS, null, x, footerTop, w, h);
+        x += w + g;
+        addTile(root, ADD, Strings.t("Add app"), null, LineIcon.PLUS, null, x, footerTop, w, h);
 
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
@@ -334,30 +418,20 @@ public class MainActivity extends Activity {
             addTile(root, pkg, label, banner, null, icon, gridX(i), gridY(i), w, h);
         }
 
-        // Bottom row: Play Store, HDMI inputs, Settings and Add app, six at most.
-        int col = 0;
-        boolean store = !apps.contains(PLAY_STORE) && launchIntent(pm, PLAY_STORE) != null;
-        List<TvInputInfo> inputs = hdmiInputs();
-        int room = PER_ROW - 2 - (store ? 1 : 0);
-        if (inputs.size() > room) inputs = inputs.subList(0, room);
-        if (store)
-            addTile(root, PLAY_STORE, "Play Store", null, LineIcon.PLAY, null, m + col++ * (w + g), bottomTop, w, h);
-        for (TvInputInfo in : inputs)
-            addTile(root, in.getId(), inputLabel(in), null, LineIcon.HDMI, null, m + col++ * (w + g), bottomTop, w, h);
-        addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, m + col++ * (w + g), bottomTop, w, h);
-        addTile(root, ADD, Strings.t("Add app"), null, LineIcon.PLUS, null, m + col * (w + g), bottomTop, w, h);
-
         // Plain icons at the top right, level with the date: any settings shortcuts picked, then the
         // network icon. Added last, so the first app keeps first focus; Up from the apps reaches them.
         List<Integer> quick = quickList();
         int ib = px(ICON_BUTTON), ig = px(ICON_GAP);
         // The last icon's right edge lines up with the apps' (its focus circle sticks out past them).
         int qx = getResources().getDisplayMetrics().widthPixels - m + (ib - px(ICON_SIZE)) / 2
-                - (quick.size() + 1) * ib - quick.size() * ig;
+                - (quick.size() + 2) * ib - (quick.size() + 1) * ig;
         for (int q : quick) {
             addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx);
             qx += ib + ig;
         }
+        // The Apps button: opens the list of every installed app.
+        addIcon(ALL_APPS, "All apps", new LineIcon(LineIcon.APPS), qx);
+        qx += ib + ig;
         netIcon = addIcon(NETWORK, Strings.t("Network"), null, qx);
         netState = -1;
         refreshNetwork();
@@ -366,6 +440,7 @@ public class MainActivity extends Activity {
         View restore = null;
         for (View t : tiles) if (t.getTag().equals(want)) restore = t;
         if (restore != null) restore.requestFocus();
+        else if (want == null && !tiles.isEmpty()) tiles.get(0).requestFocus(); // first start: HDMI 3
     }
 
     private void addTile(ViewGroup parent, final String key, String label, Drawable banner, int[] lineIcon, Drawable appIcon,
@@ -382,25 +457,34 @@ public class MainActivity extends Activity {
             // Quiet "glass" tile: icon above label.
             bg.setColor(0x13FFFFFF);
             bg.setStroke(Math.max(1, px(2)), 0x17FFFFFF);
+            // The orange HDMI 3 button: bigger, icon beside the label, dark text, as in the mockup.
+            boolean big = key.equals(accentKey);
             LinearLayout inner = new LinearLayout(this);
-            inner.setOrientation(LinearLayout.VERTICAL);
+            inner.setOrientation(big ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
             inner.setGravity(Gravity.CENTER);
             ImageView iv = new ImageView(this);
-            int size = lineIcon != null ? px(44) : px(64);
-            if (lineIcon != null) iv.setImageDrawable(new LineIcon(lineIcon));
-            else if (appIcon != null) iv.setImageDrawable(fit(appIcon, size, size));
+            int size = big ? px(64) : lineIcon != null ? px(44) : px(64);
+            if (lineIcon != null) {
+                LineIcon li = new LineIcon(lineIcon);
+                if (big) li.setColorFilter(new android.graphics.PorterDuffColorFilter(0xFF1A0B00,
+                        android.graphics.PorterDuff.Mode.SRC_IN));
+                iv.setImageDrawable(li);
+            } else if (appIcon != null) iv.setImageDrawable(fit(appIcon, size, size));
             inner.addView(iv, new LinearLayout.LayoutParams(size, size));
-            TextView t = text(px(24), 0xE0FFFFFF, regular);
+            TextView t = big ? text(px(44), 0xFF1A0B00, semibold) : text(px(24), 0xE0FFFFFF, regular);
             t.setText(label);
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
             t.setGravity(Gravity.CENTER);
             t.setPadding(px(16), 0, px(16), 0);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.topMargin = px(12);
+            if (big) lp.leftMargin = px(8);
+            else lp.topMargin = px(12);
             inner.addView(t, lp);
             card.addView(inner, new FrameLayout.LayoutParams(-1, -1));
         }
+        final boolean accent = key.equals(accentKey);
+        if (accent) bg.setColor(0xFFFF6A2B);
         card.setBackground(bg);
         card.setClipToOutline(true);
         card.setFocusable(true);
@@ -417,7 +501,8 @@ public class MainActivity extends Activity {
         final boolean glass = banner == null;
         card.setOnFocusChangeListener((v, has) -> {
             if (has) focusedKey = key;
-            if (glass) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);
+            if (glass && !accent) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);
+            if (accent) bg.setStroke(has ? px(6) : 0, Color.WHITE);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).translationZ(has ? px(26) : 0)
                     .setDuration(140).withLayer().start();
             if (caption != null) caption.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
@@ -488,7 +573,92 @@ public class MainActivity extends Activity {
         return iv;
     }
 
+    boolean adGuardOn() {
+        try {
+            return "hostname".equals(Settings.Global.getString(getContentResolver(), "private_dns_mode"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // A list of every app the TV can start, by name; pressing one opens it.
+    void showAllApps() {
+        final List<ResolveInfo> apps = new ArrayList<>(getPackageManager().queryIntentActivities(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0));
+        if (apps.isEmpty()) apps.addAll(getPackageManager().queryIntentActivities(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0));
+        Collections.sort(apps, (x, y) -> String.valueOf(x.loadLabel(getPackageManager())).compareToIgnoreCase(String.valueOf(y.loadLabel(getPackageManager()))));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("All apps")
+                .setAdapter(new AppListAdapter(this, getPackageManager(), apps), (d, which) -> {
+                    Intent launch = getPackageManager().getLaunchIntentForPackage(apps.get(which).activityInfo.packageName);
+                    if (launch != null) {
+                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        try { startActivity(launch); } catch (Exception ignored) { }
+                    }
+                })
+                .show();
+    }
+
+    /** One row of the All apps list: the app's icon and its name. Static nested class (see the note on javac above). */
+    static final class AppListAdapter extends android.widget.BaseAdapter {
+        final Context ctx;
+        final PackageManager pm;
+        final List<ResolveInfo> items;
+
+        AppListAdapter(Context ctx, PackageManager pm, List<ResolveInfo> items) {
+            this.ctx = ctx;
+            this.pm = pm;
+            this.items = items;
+        }
+
+        @Override public int getCount() { return items.size(); }
+        @Override public Object getItem(int i) { return items.get(i); }
+        @Override public long getItemId(int i) { return i; }
+
+        @Override
+        public View getView(int i, View convert, ViewGroup parent) {
+            LinearLayout row = new LinearLayout(ctx);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            float density = ctx.getResources().getDisplayMetrics().density;
+            row.setPadding((int) (16 * density), (int) (10 * density), (int) (16 * density), (int) (10 * density));
+            ImageView icon = new ImageView(ctx);
+            icon.setImageDrawable(items.get(i).loadIcon(pm));
+            row.addView(icon, new LinearLayout.LayoutParams((int) (48 * density), (int) (48 * density)));
+            TextView name = new TextView(ctx);
+            name.setText(String.valueOf(items.get(i).loadLabel(pm)));
+            name.setTextSize(22);
+            name.setTextColor(0xFFFFFFFF);
+            name.setSingleLine(true);
+            name.setPadding((int) (20 * density), 0, 0, 0);
+            row.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            return row;
+        }
+    }
+
+    // Turns AdGuard DNS on or off by switching the TV's Private DNS, then redraws the tile.
+    void toggleAdGuard() {
+        boolean on = adGuardOn();
+        try {
+            Settings.Global.putString(getContentResolver(), "private_dns_specifier", ADGUARD_HOST);
+            Settings.Global.putString(getContentResolver(), "private_dns_mode", on ? "opportunistic" : "hostname");
+            android.widget.Toast.makeText(this, on ? "AdGuard DNS is off" : "AdGuard DNS is on", android.widget.Toast.LENGTH_SHORT).show();
+        } catch (SecurityException e) {
+            android.widget.Toast.makeText(this, "One-time setup: adb shell pm grant com.ansub.tvhome android.permission.WRITE_SECURE_SETTINGS", android.widget.Toast.LENGTH_LONG).show();
+        }
+        buildTiles();
+    }
+
     private void open(String key) {
+        if (ADGUARD.equals(key)) {
+            toggleAdGuard();
+            return;
+        }
+        if (ALL_APPS.equals(key)) {
+            showAllApps();
+            return;
+        }
         Intent i;
         if (ADD.equals(key)) {
             showAddMenu(-1);
@@ -848,6 +1018,10 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, 0).edit().putString("apps", android.text.TextUtils.join(",", rowApps)).apply();
     }
 
+    private static void place(View v, int x, int y, int w, int h) {
+        v.setLayoutParams(at(x, y, w, h));
+    }
+
     // Where app number i sits in the grid.
     private int gridX(int i) {
         return px(MARGIN) + (i % PER_ROW) * (tileW + px(GAP));
@@ -975,16 +1149,6 @@ public class MainActivity extends Activity {
 
     private int px(int v) {
         return Math.round(v * scale);
-    }
-
-    private TextClock clock(String f12, String f24, int px, int color, Typeface tf) {
-        TextClock c = new TextClock(this);
-        c.setFormat12Hour(f12);
-        c.setFormat24Hour(f24);
-        c.setTextSize(TypedValue.COMPLEX_UNIT_PX, px);
-        c.setTextColor(color);
-        c.setTypeface(tf);
-        return c;
     }
 
     private TextView text(int px, int color, Typeface tf) {
