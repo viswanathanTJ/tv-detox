@@ -23,6 +23,19 @@ Claude Code or Codex does the work. You just press OK on the remote.
 </tr>
 </table>
 
+## In this fork
+
+A home screen for a Tamil household, on top of TV Detox. See [CHANGELOG.md](CHANGELOG.md) for every release, and [FEATURES.md](FEATURES.md) for the details.
+
+- **Weather** from the Google Weather API: five days, hour by hour, and rain at 7–9 pm shown first.
+- **Tamil calendar:**
+  - A month view and a day view.
+  - Vakya panchangam, as printed calendars give it: tithi, nakshatram, yogam and karanam with end times; nalla neram, gowri, raagu kalam, yamagandam and kuligai; soolam, chandrashtamam, kari naal and vasthu.
+  - Festivals and observances with pictures.
+- **A green "TV" button** for HDMI 3, and pinned apps that survive a reinstall.
+
+<img src="docs/screenshots/calendar-month.jpg" alt="Tamil calendar, month view" width="49%"> <img src="docs/screenshots/calendar-day.jpg" alt="Tamil calendar, day view" width="49%">
+
 ## Watch it work
 
 <a href="https://www.youtube.com/watch?v=fP2SGGVsaB0"><img src="https://img.youtube.com/vi/fP2SGGVsaB0/maxresdefault.jpg" alt="Watch: Claude Made My Old Android TV Feel Brand New" width="100%"></a>
@@ -403,6 +416,12 @@ If the laptop never connects, use the TV's recovery mode or a factory reset. How
    ```
 3. `sh build.sh`, then `sh install.sh <TV_IP>` installs your build instead of the release.
 4. `sh ci/smoke-test.sh <TV_IP or emulator>` checks it all works.
+
+Other SDK versions: `BUILD_TOOLS=36.1.0 PLATFORM=android-36 sh build.sh`.
+
+**Weather key.** Put your Google Weather API key in `weather.key` (git ignores it). `install.sh` copies it to the TV, where the app reads it, so release APKs never contain it. Build public releases with `GOOGLE_WEATHER_KEY= sh build.sh` to keep any key out of the APK.
+
+**Tamil calendar data.** `assets/panchang-vakya.csv` covers 2025–2030. To extend it, run `uv run --project ~/Documents/KkcAstro/app python tools/vakya_panchang.py 2025 2032` (it needs the KKC Astro Vakya engine and takes about 4 minutes a year). Dates outside the file are computed in the app.
 
 HDMI inputs are found on their own. The labels follow the TV's language, with 16 languages built in. To add yours or fix a translation, edit `src/com/ansub/tvhome/Strings.java`. Keep `key.jks`, which is made on your first build: updates must be signed with the same key.
 
