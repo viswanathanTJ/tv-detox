@@ -3,3 +3,5 @@ key.jks
 *.apk
 .DS_Store
 .idea
+weather.key
+home-config-*.txt

@@ -3,6 +3,9 @@
 #   macOS:  brew install openjdk@17 && brew install --cask android-commandlinetools
 #           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 # Use a different app list with: APPS=my-apps.txt sh build.sh
+# The weather needs a Google Weather API key. Put it in weather.key (git ignores it): install.sh copies
+# it to the TV, where the app reads it. It's also built into the APK from weather.key or
+# GOOGLE_WEATHER_KEY; build public releases with GOOGLE_WEATHER_KEY= (empty) so the key stays out.
 set -e
 cd "$(dirname "$0")"
 
@@ -10,7 +13,8 @@ cd "$(dirname "$0")"
 [ -n "$JAVA_HOME" ] && export PATH="$JAVA_HOME/bin:$PATH"
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
 [ -n "$SDK" ] || for d in /opt/homebrew/share/android-commandlinetools "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do [ -d "$d" ] && SDK=$d && break; done
-BT=$SDK/build-tools/34.0.0; JAR=$SDK/platforms/android-34/android.jar
+# Other versions: BUILD_TOOLS=36.1.0 PLATFORM=android-36 sh build.sh
+BT=$SDK/build-tools/${BUILD_TOOLS:-34.0.0}; JAR=$SDK/platforms/${PLATFORM:-android-34}/android.jar
 [ -f "$JAR" ] && [ -d "$BT" ] || { echo "Android SDK not found. Set ANDROID_HOME, and install platforms;android-34 and build-tools;34.0.0." >&2; exit 1; }
 
 rm -rf out; mkdir -p out/classes out/dex out/gen/com/ansub/tvhome
@@ -22,6 +26,12 @@ rm -rf out; mkdir -p out/classes out/dex out/gen/com/ansub/tvhome
   grep -v '^[[:space:]]*#' "${APPS:-apps.txt}" | tr -d ' \t\r' | grep -v '^$' | sed 's/.*/    "&",/'
   echo "}; }"
 } > out/gen/com/ansub/tvhome/Apps.java
+
+# The Google Weather API key, baked into WeatherKey.java.
+KEY=${GOOGLE_WEATHER_KEY-$( [ -f weather.key ] && tr -d ' \t\r\n' < weather.key || true)}
+[ -n "$KEY" ] || echo "No weather key built in: the app will read weather.key from the TV's storage." >&2
+printf 'package com.ansub.tvhome;\nfinal class WeatherKey { static final String KEY = "%s"; }\n' "$KEY" \
+  > out/gen/com/ansub/tvhome/WeatherKey.java
 
 "$BT/aapt2" link -o out/base.apk -I "$JAR" --manifest AndroidManifest.xml -A assets --min-sdk-version 21 --target-sdk-version 34
 # shellcheck disable=SC2046 # javac and d8 want one argument per file, so the list is split on purpose

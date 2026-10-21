@@ -95,13 +95,14 @@ public class MainActivity extends Activity {
     // Layout is designed at 1920x1080 and scaled to the TV's real UI size by px().
     private static final int MARGIN = 96, GAP = 36, RADIUS = 22;
     private static final int ROW_STEP = 224;
-    // Under the weather (WeatherUi.BELOW): the orange HDMI 3 button and the two info tiles, then the
+    // Under the weather (WeatherUi.BELOW): the green HDMI 3 ("TV") button and the two info tiles, then the
     // shortcut row (Play Store, other inputs, Settings, Add app), then the apps. More rows scroll.
-    private static final int BUTTON_TOP = WeatherUi.BELOW, BUTTON_H = 140, SHORTCUT_TOP = 620;
+    // The first app row sits as far under the button as the app rows sit from each other (about 80).
+    private static final int BUTTON_TOP = WeatherUi.BELOW, BUTTON_H = 140, SHORTCUT_TOP = 660;
     private static final int ICON_TOP = 76, ICON_BUTTON = 72, ICON_SIZE = 40, ICON_GAP = 12; // level with the date
     private float scale = 1f;
 
-    private static Typeface regular, semibold;
+    private static Typeface regular, semibold, black;
 
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
@@ -109,7 +110,7 @@ public class MainActivity extends Activity {
     private boolean dirty = true;
     private java.util.Locale shownLocale; // the TV's language (and region) when the page was built
     private String focusedKey;
-    private String accentKey; // the big orange TV button
+    private String accentKey; // the big light green TV button
     private final List<String> rowApps = new ArrayList<>(); // the top row as shown, in order
     private String movingKey;   // the app being moved with left/right, if any
     private TextView moveHint;  // shown above the apps while moving
@@ -146,7 +147,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        restoreConfig();
         saveConfig(getIntent());
+        backupConfig();
         loadFonts();
         scale = getResources().getDisplayMetrics().widthPixels / 1920f;
         getWindow().setBackgroundDrawable(background());
@@ -254,8 +257,56 @@ public class MainActivity extends Activity {
             else e.putString("quick", quick);
         }
         e.apply();
+        backupConfig();
         dirty = true;
         return true;
+    }
+
+    // A copy of the saved apps and shortcuts outside the app's private data, in
+    // /sdcard/Android/data/com.ansub.tvhome/files. An update keeps the private data but an uninstall
+    // (like a signing key change) wipes it, so install.sh copies this file off the TV before an
+    // uninstall and back after, and restoreConfig() reads it in when nothing is saved yet.
+    private static final String CONFIG_COPY = "home-config.txt";
+
+    private File configCopy() {
+        File dir = getExternalFilesDir(null);
+        return dir == null ? null : new File(dir, CONFIG_COPY);
+    }
+
+    // Writes what's saved now as "apps=..." and "quick=..." lines.
+    private void backupConfig() {
+        File f = configCopy();
+        if (f == null) return;
+        SharedPreferences p = getSharedPreferences(PREFS, 0);
+        StringBuilder sb = new StringBuilder();
+        for (String k : new String[] {"apps", "quick"}) {
+            String v = p.getString(k, null);
+            if (v != null) sb.append(k).append('=').append(v).append('\n');
+        }
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(sb.toString().getBytes("UTF-8"));
+        } catch (Exception ignored) {
+            // No shared storage: the private copy still works, it just won't survive an uninstall.
+        }
+    }
+
+    // After a reinstall: nothing saved, but the copy is there, so take the apps and shortcuts from it.
+    private void restoreConfig() {
+        SharedPreferences p = getSharedPreferences(PREFS, 0);
+        File f = configCopy();
+        if (p.contains("apps") || p.contains("quick") || f == null || !f.exists()) return;
+        SharedPreferences.Editor e = p.edit();
+        try (java.io.BufferedReader in = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"))) {
+            for (String line; (line = in.readLine()) != null; ) {
+                int eq = line.indexOf('=');
+                String k = eq < 0 ? "" : line.substring(0, eq).trim(), v = eq < 0 ? "" : line.substring(eq + 1).trim();
+                if ((k.equals("apps") || k.equals("quick")) && !v.isEmpty()) e.putString(k, v);
+            }
+        } catch (Exception ignored) {
+            return;
+        }
+        e.apply();
     }
 
     private List<String> appList(PackageManager pm) {
@@ -362,14 +413,14 @@ public class MainActivity extends Activity {
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(GAP);
         root.setMinimumHeight(footerTop + h + px(MARGIN));
 
-        // Under the weather: a big orange "Switch to HDMI 3" button first (it takes first focus), then
+        // Under the weather: a big light green "TV" button (HDMI 3) first (it takes first focus), then
         // the next festival and the next Tamil day. Without HDMI 3 the two tiles share the row.
         int bh = px(BUTTON_H), by = px(BUTTON_TOP), half = 3 * w + 2 * g;
         int x = m;
         if (pinned != null) {
             int bw = 2 * w + g;
             accentKey = pinned.getId();
-            addTile(root, pinned.getId(), "Switch to " + inputLabel(pinned), null, LineIcon.HDMI, null, x, by, bw, bh);
+            addTile(root, pinned.getId(), "TV", null, LineIcon.TV, null, x, by, bw, bh);
             x += bw + g;
             place(festivalTile, x, by, bw, bh);
             place(tamilTile, x + bw + g, by, bw, bh);
@@ -457,21 +508,22 @@ public class MainActivity extends Activity {
             // Quiet "glass" tile: icon above label.
             bg.setColor(0x13FFFFFF);
             bg.setStroke(Math.max(1, px(2)), 0x17FFFFFF);
-            // The orange HDMI 3 button: bigger, icon beside the label, dark text, as in the mockup.
+            // The green HDMI 3 ("TV") button, styled like the app banners: a heavy white wordmark and icon.
             boolean big = key.equals(accentKey);
             LinearLayout inner = new LinearLayout(this);
             inner.setOrientation(big ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
             inner.setGravity(Gravity.CENTER);
             ImageView iv = new ImageView(this);
-            int size = big ? px(64) : lineIcon != null ? px(44) : px(64);
+            int size = big ? px(76) : lineIcon != null ? px(44) : px(64);
             if (lineIcon != null) {
                 LineIcon li = new LineIcon(lineIcon);
-                if (big) li.setColorFilter(new android.graphics.PorterDuffColorFilter(0xFF1A0B00,
+                if (big) li.bold().setColorFilter(new android.graphics.PorterDuffColorFilter(Color.WHITE,
                         android.graphics.PorterDuff.Mode.SRC_IN));
                 iv.setImageDrawable(li);
             } else if (appIcon != null) iv.setImageDrawable(fit(appIcon, size, size));
             inner.addView(iv, new LinearLayout.LayoutParams(size, size));
-            TextView t = big ? text(px(44), 0xFF1A0B00, semibold) : text(px(24), 0xE0FFFFFF, regular);
+            TextView t = big ? text(px(64), Color.WHITE, black) : text(px(24), 0xE0FFFFFF, regular);
+            if (big) t.setLetterSpacing(0.04f);
             t.setText(label);
             t.setSingleLine(true);
             t.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -484,7 +536,10 @@ public class MainActivity extends Activity {
             card.addView(inner, new FrameLayout.LayoutParams(-1, -1));
         }
         final boolean accent = key.equals(accentKey);
-        if (accent) bg.setColor(0xFFFF6A2B);
+        if (accent) { // rich brand green, a little brighter at the top left
+            bg.setOrientation(GradientDrawable.Orientation.TL_BR);
+            bg.setColors(new int[] {0xFF14B85A, 0xFF0A9A48, 0xFF067A38});
+        }
         card.setBackground(bg);
         card.setClipToOutline(true);
         card.setFocusable(true);
@@ -1016,6 +1071,7 @@ public class MainActivity extends Activity {
     // Saves the top row as the app list, so it no longer follows apps.txt.
     private void saveRow() {
         getSharedPreferences(PREFS, 0).edit().putString("apps", android.text.TextUtils.join(",", rowApps)).apply();
+        backupConfig();
     }
 
     private static void place(View v, int x, int y, int w, int h) {
@@ -1123,6 +1179,7 @@ public class MainActivity extends Activity {
         if (regular != null) return;
         regular = fromFile("/system/fonts/MILanPro_Normal.ttf", Typeface.create("sans-serif", Typeface.NORMAL));
         semibold = fromFile("/system/fonts/MILanPro_SemiBold.ttf", Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        black = Typeface.create("sans-serif-black", Typeface.NORMAL); // Roboto Black, for the TV button
     }
 
     private static Typeface fromFile(String path, Typeface fallback) {

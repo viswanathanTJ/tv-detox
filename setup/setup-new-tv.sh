@@ -31,11 +31,18 @@ echo "1. Installing TV Monitor"
 adb_tv install -r "$APK_DIR/TVMonitor-release.apk" | tail -1
 
 echo "2. Installing the home screen"
+# The home screen's copy of its apps and shortcuts; an uninstall would delete it, so save it first.
+CONFIG=/sdcard/Android/data/com.ansub.tvhome/files/home-config.txt
+SAVED=$(mktemp)
+adb_tv pull "$CONFIG" "$SAVED" >/dev/null 2>&1 || rm -f "$SAVED"
 if ! out=$(adb_tv install -r "$APK_DIR/TVHome-release.apk" 2>&1); then
   case "$out" in
-    *UPDATE_INCOMPATIBLE*) echo "  Replacing an older copy signed with another key (its saved settings are reset)."
+    *UPDATE_INCOMPATIBLE*) echo "  Replacing an older copy signed with another key (your home screen apps are kept)."
       adb_tv uninstall com.ansub.tvhome >/dev/null 2>&1 || true
-      adb_tv install "$APK_DIR/TVHome-release.apk" | tail -1 ;;
+      adb_tv install "$APK_DIR/TVHome-release.apk" | tail -1
+      if [ -f "$SAVED" ]; then
+        sh_tv mkdir -p "${CONFIG%/*}" && adb_tv push "$SAVED" "$CONFIG" >/dev/null || echo "  Couldn't put the home screen apps back." >&2
+      fi ;;
     *) echo "$out" >&2; exit 1 ;;
   esac
 else
@@ -44,6 +51,12 @@ fi
 sh_tv cmd role add-role-holder --user 0 android.app.role.HOME com.ansub.tvhome >/dev/null 2>&1 || true
 sh_tv cmd package set-home-activity com.ansub.tvhome/.MainActivity >/dev/null 2>&1 || true
 sh_tv cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1
+
+# The weather key, from weather.key next to this repo's build.sh, if there is one.
+KEYFILE="$(dirname "$0")/../weather.key"
+if [ -f "$KEYFILE" ]; then
+  sh_tv mkdir -p "${CONFIG%/*}" && adb_tv push "$KEYFILE" "${CONFIG%/*}/weather.key" >/dev/null || echo "  Couldn't copy weather.key." >&2
+fi
 
 echo "3. Letting the home screen change TV DNS (AdGuard tile)"
 sh_tv pm grant com.ansub.tvhome android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1 || echo "  (could not grant; the AdGuard tile will say so)"

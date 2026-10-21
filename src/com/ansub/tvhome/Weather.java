@@ -18,22 +18,25 @@ import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 
-// The 5-day forecast for one place, from Open-Meteo (free, no key). Fetched on a background thread at
-// most every 30 minutes (a failed try is retried after 5 minutes), and the last good answer is kept in
-// SharedPreferences, so the home screen still shows it when the TV is offline.
+// The 5-day forecast for one place, from the Google Weather API (needs a key, see key()). Fetched on a
+// background thread at most every 6 hours (a failed try is retried after an hour), and the last good
+// answer is kept in SharedPreferences, so the home screen still shows it when the TV is offline.
+// The key allows 1,000 calls a month and one refresh is 6 calls (1 daily, 5 pages of 24 hours), so
+// that's at most 4 refreshes (24 calls) a day, and never more than MAX_CALLS_A_DAY whatever happens.
 final class Weather {
-    // Madurai, PIN 625009.
+    // Munichalai, Madurai, PIN 625009.
     static final String PLACE = "Madurai";
-    static final double LAT = 9.9252, LON = 78.1198;
+    static final double LAT = 9.9181, LON = 78.1344;
     static final String TZ = "Asia/Kolkata";
-    static final String FORECAST_URL = "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON
-            + "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset,uv_index_max"
-            + "&hourly=temperature_2m,precipitation_probability,weather_code,relative_humidity_2m,wind_speed_10m"
-            + "&timezone=Asia%2FKolkata&forecast_days=5";
-    static final long REFRESH_MS = 30 * 60 * 1000L, RETRY_MS = 5 * 60 * 1000L;
+    static final String API = "https://weather.googleapis.com/v1/forecast/";
+    static final String WHERE = "location.latitude=" + LAT + "&location.longitude=" + LON + "&unitsSystem=METRIC";
+    static final int DAYS = 5, HOURS = 120; // hours come 24 to a page
+    static final long REFRESH_MS = 6 * 60 * 60 * 1000L, RETRY_MS = 60 * 60 * 1000L;
+    static final int MAX_CALLS_A_DAY = 30; // 30 x 31 days = 930, under the 1,000 a month
     static final int RAIN_PCT = 40; // an hour at or above this chance of rain counts as rainy
+    static final int EVENING_FROM = 19, EVENING_TO = 21; // 7–9 pm, shown first on the home screen
 
-    private static final String PREFS = "weather";
+    private static final String PREFS = "google-weather"; // not "weather": that holds Open-Meteo's answer
     private static long lastTry;
     private static boolean running;
 
@@ -85,8 +88,7 @@ final class Weather {
         final Handler main = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             try {
-                String json = download();
-                new JSONObject(json).getJSONObject("daily"); // only keep an answer that looks right
+                String json = download(app.getSharedPreferences(PREFS, 0), key(app));
                 app.getSharedPreferences(PREFS, 0).edit()
                         .putString("json", json).putLong("at", System.currentTimeMillis()).apply();
             } catch (Throwable ignored) {
@@ -99,8 +101,58 @@ final class Weather {
         }, "weather").start();
     }
 
-    private static String download() throws IOException {
-        HttpURLConnection c = (HttpURLConnection) new java.net.URL(FORECAST_URL).openConnection();
+    // Both answers in one object: {"days": [...forecastDays], "hours": [...forecastHours]}.
+    // The API key: from weather.key in the app's folder on the TV's storage
+    // (/sdcard/Android/data/com.ansub.tvhome/files, put there by install.sh or adb push), else the one
+    // built in. Release APKs have none built in, so the key never ships with them.
+    static String key(Context app) {
+        java.io.File dir = app.getExternalFilesDir(null);
+        java.io.File f = dir == null ? null : new java.io.File(dir, "weather.key");
+        if (f != null && f.isFile() && f.length() < 1024) {
+            try (InputStream in = new java.io.FileInputStream(f)) {
+                byte[] b = new byte[(int) f.length()];
+                int n = 0;
+                for (int r; n < b.length && (r = in.read(b, n, b.length - n)) > 0; ) n += r;
+                String k = new String(b, 0, n, "UTF-8").replaceAll("\\s", "");
+                if (!k.isEmpty()) return k;
+            } catch (IOException ignored) {
+                // Unreadable: fall back to the built-in key.
+            }
+        }
+        return WeatherKey.KEY;
+    }
+
+    private static String download(SharedPreferences p, String apiKey) throws Exception {
+        if (apiKey.isEmpty()) throw new IOException("no API key");
+        if (budget(p) < 6) throw new IOException("out of calls for today"); // don't start what can't finish
+        String key = "&key=" + apiKey;
+        JSONArray days = new JSONObject(get(p, API + "days:lookup?" + WHERE + "&days=" + DAYS + "&pageSize=" + DAYS + key))
+                .getJSONArray("forecastDays"); // only keep an answer that looks right
+        JSONArray hours = new JSONArray();
+        String page = "";
+        do {
+            JSONObject o = new JSONObject(get(p, API + "hours:lookup?" + WHERE + "&hours=" + HOURS + "&pageSize=24" + key
+                    + (page.isEmpty() ? "" : "&pageToken=" + java.net.URLEncoder.encode(page, "UTF-8"))));
+            JSONArray a = o.optJSONArray("forecastHours");
+            for (int i = 0; a != null && i < a.length(); i++) hours.put(a.get(i));
+            page = o.optString("nextPageToken", "");
+        } while (!page.isEmpty() && hours.length() < HOURS);
+        return new JSONObject().put("days", days).put("hours", hours).toString();
+    }
+
+    // Calls left today, counted per day in Madurai.
+    private static int budget(SharedPreferences p) {
+        int[] n = now();
+        String today = isoDate(n[0], n[1], n[2]);
+        return today.equals(p.getString("calls_day", "")) ? MAX_CALLS_A_DAY - p.getInt("calls", 0) : MAX_CALLS_A_DAY;
+    }
+
+    private static String get(SharedPreferences p, String url) throws IOException {
+        int left = budget(p);
+        if (left <= 0) throw new IOException("out of calls for today");
+        int[] d = now();
+        p.edit().putString("calls_day", isoDate(d[0], d[1], d[2])).putInt("calls", MAX_CALLS_A_DAY - left + 1).commit();
+        HttpURLConnection c = (HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
         try {
@@ -134,46 +186,49 @@ final class Weather {
         int[] now = now();
         String today = isoDate(now[0], now[1], now[2]);
         JSONObject root = new JSONObject(json);
-        JSONObject daily = root.getJSONObject("daily");
-        JSONArray dates = daily.getJSONArray("time");
+        JSONArray days = root.getJSONArray("days");
         Forecast f = new Forecast();
-        for (int i = 0; i < dates.length(); i++) {
-            String date = dates.getString(i);
-            if (date.compareTo(today) < 0) continue; // an old answer: skip days already gone
+        for (int i = 0; i < days.length(); i++) {
+            JSONObject g = days.getJSONObject(i);
+            JSONObject dd = g.getJSONObject("displayDate");
             Day d = new Day();
-            d.date = date;
-            d.y = Integer.parseInt(date.substring(0, 4));
-            d.m = Integer.parseInt(date.substring(5, 7));
-            d.d = Integer.parseInt(date.substring(8, 10));
+            d.y = dd.getInt("year");
+            d.m = dd.getInt("month");
+            d.d = dd.getInt("day");
+            d.date = isoDate(d.y, d.m, d.d);
+            if (d.date.compareTo(today) < 0) continue; // an old answer: skip days already gone
             d.weekday = TamilDate.weekday(d.y, d.m, d.d);
-            d.today = date.equals(today);
-            d.max = num(daily, "temperature_2m_max", i);
-            d.min = num(daily, "temperature_2m_min", i);
-            d.uv = num(daily, "uv_index_max", i);
-            d.rain = whole(num(daily, "precipitation_probability_max", i));
-            d.code = whole(num(daily, "weather_code", i));
-            d.sunrise = clock(str(daily, "sunrise", i));
-            d.sunset = clock(str(daily, "sunset", i));
+            d.today = d.date.equals(today);
+            JSONObject day = g.optJSONObject("daytimeForecast"), night = g.optJSONObject("nighttimeForecast");
+            d.max = num(g, "maxTemperature", "degrees");
+            d.min = num(g, "minTemperature", "degrees");
+            d.uv = day == null ? Double.NaN : day.optDouble("uvIndex", Double.NaN);
+            d.rain = Math.max(rain(day), rain(night));
+            d.code = code(day);
+            JSONObject sun = g.optJSONObject("sunEvents");
+            if (sun != null) {
+                d.sunrise = clock(sun.optString("sunriseTime", null));
+                d.sunset = clock(sun.optString("sunsetTime", null));
+            }
             f.days.add(d);
         }
-        JSONObject hourly = root.optJSONObject("hourly");
-        JSONArray times = hourly == null ? null : hourly.optJSONArray("time");
-        if (times != null) {
-            for (int i = 0; i < times.length(); i++) {
-                String t = times.optString(i, ""); // "2026-10-20T08:00"
-                if (t.length() < 13) continue;
-                Day d = find(f, t.substring(0, 10));
-                if (d == null) continue;
-                Hour h = new Hour();
-                h.hour = Integer.parseInt(t.substring(11, 13));
-                if (h.hour < 0 || h.hour > 23) continue;
-                h.temp = num(hourly, "temperature_2m", i);
-                h.rain = whole(num(hourly, "precipitation_probability", i));
-                h.code = whole(num(hourly, "weather_code", i));
-                h.humidity = whole(num(hourly, "relative_humidity_2m", i));
-                h.wind = num(hourly, "wind_speed_10m", i);
-                d.hours[h.hour] = h;
-            }
+        JSONArray hours = root.optJSONArray("hours");
+        for (int i = 0; hours != null && i < hours.length(); i++) {
+            JSONObject g = hours.getJSONObject(i);
+            JSONObject t = g.optJSONObject("displayDateTime");
+            if (t == null) continue;
+            Day d = find(f, isoDate(t.optInt("year"), t.optInt("month"), t.optInt("day")));
+            if (d == null) continue;
+            Hour h = new Hour();
+            h.hour = t.optInt("hours", 0); // left out at midnight
+            if (h.hour < 0 || h.hour > 23) continue;
+            h.temp = num(g, "temperature", "degrees");
+            h.rain = rain(g);
+            h.code = code(g);
+            h.humidity = g.has("relativeHumidity") ? g.optInt("relativeHumidity") : -1;
+            JSONObject wind = g.optJSONObject("wind");
+            h.wind = wind == null ? Double.NaN : num(wind, "speed", "value"); // km/h
+            d.hours[h.hour] = h;
         }
         for (Day d : f.days) {
             // Today only counts the hours still to come.
@@ -190,6 +245,13 @@ final class Weather {
     private static Day find(Forecast f, String date) {
         for (Day d : f.days) if (d.date.equals(date)) return d;
         return null;
+    }
+
+    // The highest chance of rain from 7 to 9 pm (today: only the hours still to come), or -1 without data.
+    static int eveningRain(Day d) {
+        int from = d.today ? Math.max(EVENING_FROM, now()[3]) : EVENING_FROM, max = -1;
+        for (int h = from; h < EVENING_TO; h++) if (d.hours[h] != null) max = Math.max(max, d.hours[h].rain);
+        return max;
     }
 
     // Rainy spells: runs of hours with at least RAIN_PCT chance, as {from, to} with to exclusive.
@@ -227,7 +289,7 @@ final class Weather {
         return sa.equals(sb) ? a.substring(0, a.indexOf(' ')) + "–" + b : a + "–" + b;
     }
 
-    // WMO weather codes, in words.
+    // WMO weather codes (Google's conditions are turned into these by code()), in words.
     static String describe(int code) {
         if (code == 0) return "Clear sky";
         if (code == 1) return "Mainly clear";
@@ -248,28 +310,53 @@ final class Weather {
         return Double.isNaN(t) ? "–" : Math.round(t) + "°";
     }
 
-    private static double num(JSONObject o, String key, int i) {
-        JSONArray a = o.optJSONArray(key);
-        return a == null || a.isNull(i) ? Double.NaN : a.optDouble(i);
+    private static double num(JSONObject o, String key, String field) {
+        JSONObject v = o == null ? null : o.optJSONObject(key);
+        return v == null || !v.has(field) ? Double.NaN : v.optDouble(field, Double.NaN);
     }
 
-    private static String str(JSONObject o, String key, int i) {
-        JSONArray a = o.optJSONArray(key);
-        return a == null || a.isNull(i) ? null : a.optString(i, null);
+    // The chance of rain in percent, or -1.
+    private static int rain(JSONObject o) {
+        JSONObject p = o == null ? null : o.optJSONObject("precipitation");
+        JSONObject q = p == null ? null : p.optJSONObject("probability");
+        return q == null ? -1 : q.optInt("percent", -1);
     }
 
-    private static int whole(double v) {
-        return Double.isNaN(v) ? -1 : (int) Math.round(v);
+    // Google's weatherCondition.type as the nearest WMO code, which the icons and words are keyed on.
+    static int code(JSONObject o) {
+        JSONObject c = o == null ? null : o.optJSONObject("weatherCondition");
+        String t = c == null ? "" : c.optString("type", "");
+        switch (t) {
+            case "CLEAR": return 0;
+            case "MOSTLY_CLEAR": return 1;
+            case "PARTLY_CLOUDY": return 2;
+            case "MOSTLY_CLOUDY": case "CLOUDY": case "WINDY": return 3;
+            case "LIGHT_RAIN_SHOWERS": case "CHANCE_OF_SHOWERS": case "SCATTERED_SHOWERS": return 80;
+            case "RAIN_SHOWERS": return 81;
+            case "HEAVY_RAIN_SHOWERS": return 82;
+            case "LIGHT_RAIN": case "LIGHT_TO_MODERATE_RAIN": return 61;
+            case "RAIN": case "WIND_AND_RAIN": return 63;
+            case "MODERATE_TO_HEAVY_RAIN": case "HEAVY_RAIN": case "RAIN_PERIODICALLY_HEAVY": return 65;
+            case "HAIL": case "HAIL_SHOWERS": return 77;
+            case "THUNDERSTORM": case "THUNDERSHOWER": case "LIGHT_THUNDERSTORM_RAIN":
+            case "SCATTERED_THUNDERSTORMS": case "HEAVY_THUNDERSTORM": return 95;
+        }
+        if (t.contains("SNOW")) return 73;
+        return t.isEmpty() ? -1 : 3;
     }
 
-    // "2026-10-20T06:01" to "6:01 am".
+    // "2026-10-20T00:31:12.345Z" (UTC) to "6:01 am" in Madurai.
     private static String clock(String iso) {
-        if (iso == null || iso.length() < 16) return null;
+        if (iso == null || iso.length() < 19) return null;
         try {
-            int h = Integer.parseInt(iso.substring(11, 13));
-            String mm = iso.substring(14, 16);
-            return (h % 12 == 0 ? 12 : h % 12) + ":" + mm + (h < 12 ? " am" : " pm");
-        } catch (NumberFormatException e) {
+            java.text.SimpleDateFormat in = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT);
+            in.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Calendar c = Calendar.getInstance(TimeZone.getTimeZone(TZ));
+            c.setTime(in.parse(iso.substring(0, 19)));
+            int h = c.get(Calendar.HOUR_OF_DAY);
+            return (h % 12 == 0 ? 12 : h % 12) + String.format(Locale.ROOT, ":%02d", c.get(Calendar.MINUTE))
+                    + (h < 12 ? " am" : " pm");
+        } catch (Exception e) {
             return null;
         }
     }

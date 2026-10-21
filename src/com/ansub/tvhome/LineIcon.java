@@ -36,10 +36,15 @@ final class LineIcon extends Drawable {
     static final int[] PICTURE ={0, 30, 50, 1, 210, 50, 1, 210, 165, 1, 30, 165, 2, 0, 120, 165, 1, 120, 200,
             0, 80, 200, 1, 160, 200};
 
+    // A TV: screen, antenna and two feet.
+    static final int[] TV = {0, 25, 75, 1, 215, 75, 1, 215, 190, 1, 25, 190, 2, 0, 85, 25, 1, 120, 70, 1, 155, 25,
+            0, 60, 190, 1, 50, 215, 0, 180, 190, 1, 190, 215};
+
     private final int[] ops;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF arc = new RectF();
+    private float weight = 16; // stroke width in tenths of the grid
 
     LineIcon(int[] ops) {
         this.ops = ops;
@@ -49,11 +54,17 @@ final class LineIcon extends Drawable {
         paint.setColor(0xEBFFFFFF);
     }
 
+    // A heavier line, for a bold logo-like icon.
+    LineIcon bold() {
+        weight = 24;
+        return this;
+    }
+
     @Override
     public void draw(Canvas c) {
         if (ops == null) return;
         float s = getBounds().width() / 240f; // ops are in tenths of the 24-unit grid
-        paint.setStrokeWidth(16 * s);
+        paint.setStrokeWidth(weight * s);
         path.reset();
         for (int i = 0; i < ops.length; ) {
             switch (ops[i]) {

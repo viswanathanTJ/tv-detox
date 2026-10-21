@@ -39,7 +39,7 @@ import java.util.TimeZone;
 final class WeatherUi {
     // Colours from the approved mockup.
     static final int CARD = 0xFF1A2742, CARD2 = 0xFF22335A, WET_BG = 0xFF16335F, RAIN = 0xFF2F7DF6,
-            RAIN_BG = 0xFF12315E, DIM = 0xFFB8C4E0, TEXT = 0xFFF4F7FF, RAIN_TEXT = 0xFF8DBBFF, GOLD = 0xFFFFD166,
+            RAIN_BG = 0xFF12315E, DIM = 0xFFB8C4E0, TEXT = 0xFFF4F7FF, RAIN_TEXT = 0xFF8DBBFF, DRY_TEXT = 0xFF7EE2A8, GOLD = 0xFFFFD166,
             BUTTON = 0xFF2A3A5F, PAGE = 0xFF070C16, BAR = 0xFF2A3A5F, BAR_MID = 0xFF4A6FB0;
 
     // Where things sit on the home screen (design pixels).
@@ -234,31 +234,26 @@ final class WeatherUi {
         head.addView(ic, new LinearLayout.LayoutParams(px(60), px(60)));
         c.addView(head, new LinearLayout.LayoutParams(-1, px(70)));
 
-        // Rain times, one per line, each with a small rain icon.
-        List<String> wins = new ArrayList<>();
-        for (int[] win : d.windows) wins.add(Weather.shortWindow(win));
-        if (wins.isEmpty()) {
+        // 7–9 pm comes first: rain then, with its chance. If it's dry then, say so, and show the day's
+        // first other rain time under it. Without hourly data for 7–9 pm, just the first rain time.
+        int evening = Weather.eveningRain(d);
+        if (evening >= Weather.RAIN_PCT) {
+            c.addView(rainRow("7–9 PM · " + evening + "%", 32), rowParams());
+        } else if (evening >= 0) {
+            LinearLayout two = new LinearLayout(a);
+            two.setOrientation(LinearLayout.VERTICAL);
+            TextView dry = line(24, DRY_TEXT, semibold);
+            dry.setText("No rain 7–9 PM");
+            two.addView(dry, new LinearLayout.LayoutParams(-1, px(30)));
+            if (d.wet()) two.addView(rainRow(Weather.shortWindow(d.windows.get(0)), 24),
+                    new LinearLayout.LayoutParams(-1, px(30)));
+            c.addView(two, rowParams());
+        } else if (d.wet()) {
+            c.addView(rainRow(Weather.shortWindow(d.windows.get(0)), 32), rowParams());
+        } else {
             TextView none = line(24, DIM, semibold);
             none.setText("No rain");
             c.addView(none, new LinearLayout.LayoutParams(-1, px(32)));
-        } else {
-            for (int i = 0; i < wins.size() && i < 1; i++) {   // one time range per day
-                LinearLayout row = new LinearLayout(a);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                ImageView ri = new ImageView(a);
-                ri.setImageDrawable(new WeatherIcon(WeatherIcon.RAIN));
-                row.addView(ri, new LinearLayout.LayoutParams(px(30), px(30)));
-                TextView t = line(32, RAIN_TEXT, semibold);
-                t.setSingleLine(true);
-                t.setText(wins.get(i).toUpperCase(Locale.ROOT));
-                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2);
-                tp.leftMargin = px(8);
-                row.addView(t, tp);
-                LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, px(60));
-                rowLp.topMargin = px(10);
-                c.addView(row, rowLp);
-            }
         }
 
         TextView temps = line(24, TEXT, regular);
@@ -270,6 +265,28 @@ final class WeatherUi {
         focusStyle(c, bg, d.wet() ? RAIN : 0, d.wet() ? 3 : 0, 1f);
         c.setOnClickListener(v -> openDay(index));   // straight to the full-day data, no hourly grid
         return c;
+    }
+
+    // A small rain icon and a time like "6–9 PM".
+    private View rainRow(String text, int size) {
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView ri = new ImageView(a);
+        ri.setImageDrawable(new WeatherIcon(WeatherIcon.RAIN));
+        row.addView(ri, new LinearLayout.LayoutParams(px(size - 2), px(size - 2)));
+        TextView t = line(size, RAIN_TEXT, semibold);
+        t.setText(text.toUpperCase(Locale.ROOT));
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2);
+        tp.leftMargin = px(8);
+        row.addView(t, tp);
+        return row;
+    }
+
+    private LinearLayout.LayoutParams rowParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, px(60));
+        lp.topMargin = px(10);
+        return lp;
     }
 
     // "from 8 am to 12 pm", or "all day".

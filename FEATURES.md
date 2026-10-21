@@ -10,7 +10,7 @@
 
 ## Where the numbers come from
 
-- **Weather:** Open-Meteo (free, no key needed) for Madurai, PIN 625009 (latitude 9.9252, longitude 78.1198, time zone Asia/Kolkata). The app downloads it at most once every 30 minutes. If a download fails, it tries again after 5 minutes, or when the network comes back. A "rainy hour" means a rain chance of 40% or more. Rain times are runs of rainy hours next to each other. For today, only the hours still to come count.
+- **Weather:** Google Weather API (the key is read from weather.key in /sdcard/Android/data/com.ansub.tvhome/files on the TV; install.sh copies it there) for Munichalai, Madurai, PIN 625009 (latitude 9.9181, longitude 78.1344, time zone Asia/Kolkata). The key allows 1,000 calls a month, so the app downloads it at most once every 6 hours (6 calls each time), retries a failed download after an hour, and never makes more than 30 calls a day. A "rainy hour" means a rain chance of 40% or more. Rain times are runs of rainy hours next to each other. For today, only the hours still to come count.
 - **Humidity** is the average for the day. **Wind** is the strongest hourly wind of the day. **UV** is the day's maximum.
 - **Festivals and holidays:** the file `assets/holidays.csv` (2026 and 2027), which is built into the app.
 - **Tamil date, Amavasai and Pournami:** worked out in the app from the positions of the sun and the moon. It uses standard astronomy formulas and the Lahiri ayanamsa (about 24.2° in 2026). A Tamil month starts on the day the sun enters the next sign, if that happens before sunset in Madurai. If it happens after sunset, the month starts the next day. Amavasai and Pournami are the days on which the new or full moon falls, counted from one sunrise to the next.
@@ -18,7 +18,7 @@
 ## What is approximate
 
 - **The Tamil day number and the Amavasai and Pournami days are calculated, not looked up.** They match printed calendars on almost every day. They can be one day off when the sun changes sign, or the moon reaches new or full, within about half an hour of sunset or sunrise. Printed calendars also differ from each other on those days.
-- Forecasts are only forecasts. The rain chance is Open-Meteo's estimate for each hour.
+- Forecasts are only forecasts. The rain chance is Google's estimate for each hour.
 
 ## When the TV is offline
 

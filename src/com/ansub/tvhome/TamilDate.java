@@ -23,7 +23,7 @@ package com.ansub.tvhome;
 // sunset or sunrise; printed panchangams can also differ from each other on those days.
 final class TamilDate {
     // Madurai, for sunrise. Same place as the weather.
-    static final double LAT = 9.9252, LON = 78.1198;
+    static final double LAT = 9.9181, LON = 78.1344;
     static final double IST_HOURS = 5.5;
 
     static final String[] MONTHS_EN = {"Chithirai", "Vaikasi", "Aani", "Aadi", "Aavani", "Purattasi",

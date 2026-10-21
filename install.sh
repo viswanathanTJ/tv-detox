@@ -39,14 +39,37 @@ if [ ! -f "$APK" ]; then
   curl -fsSL -o "$APK" https://github.com/Ansub/tv-detox/releases/latest/download/tvhome.apk
 fi
 
+# The home screen keeps a copy of its apps and shortcuts here. Save it before installing (an uninstall
+# below would delete it) and keep it on this computer too, one file per TV.
+CONFIG=/sdcard/Android/data/com.ansub.tvhome/files/home-config.txt
+SERIAL=$(adb -s "$TV" shell getprop ro.serialno 2>/dev/null | tr -d '\r'); SAVED="home-config-${SERIAL:-tv}.txt"
+adb -s "$TV" pull "$CONFIG" "$SAVED" >/dev/null 2>&1 && echo "Saved your home screen apps to $SAVED."
+
 echo "Installing… If your TV shows a Google Play Protect message, follow it on the TV to allow the install."
 if ! out=$(adb -s "$TV" install -r "$APK" 2>&1); then
   case "$out" in
     *UPDATE_INCOMPATIBLE*) echo "Replacing an older copy signed with a different key…"
-                           adb -s "$TV" uninstall com.ansub.tvhome >/dev/null; adb -s "$TV" install "$APK" ;;
+                           adb -s "$TV" uninstall com.ansub.tvhome >/dev/null; adb -s "$TV" install "$APK"
+                           # Put the saved apps back: the app reads them in when it next starts.
+                           if [ -f "$SAVED" ]; then
+                             adb -s "$TV" shell mkdir -p "${CONFIG%/*}" && adb -s "$TV" push "$SAVED" "$CONFIG" >/dev/null \
+                               && echo "Your home screen apps are back." || echo "Couldn't put back $SAVED." >&2
+                           fi ;;
     *) echo "$out" >&2; exit 1 ;;
   esac
 fi
+
+# The Google Weather API key, if you have one in weather.key here. The app reads it from the TV's
+# storage, so release APKs (which have no key built in) get the weather too.
+if [ -f weather.key ]; then
+  adb -s "$TV" shell mkdir -p "${CONFIG%/*}" && adb -s "$TV" push weather.key "${CONFIG%/*}/weather.key" >/dev/null \
+    && echo "Copied your weather key to the TV." || echo "Couldn't copy weather.key to the TV." >&2
+fi
+
+# Lets the AdGuard tile switch the TV's Private DNS. Android only gives this through adb, and an
+# uninstall (like the key change above) drops it, so grant it on every install.
+adb -s "$TV" shell pm grant com.ansub.tvhome android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1 \
+  || echo "Couldn't let the AdGuard tile change DNS. It will show how to fix it when you press it."
 
 if [ -n "$APPS" ] || [ -n "$QUICK" ]; then
   # The stamp makes the app apply this list once, even if Android later replays this start.
