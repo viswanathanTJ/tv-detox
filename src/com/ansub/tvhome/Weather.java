@@ -288,6 +288,22 @@ final class Weather {
             h.wind = wind == null ? Double.NaN : num(wind, "speed", "value"); // km/h
             d.hours[h.hour] = h;
         }
+        // Google's hourly chances can stay low on a night its own night forecast calls rainy, so evening
+        // and night hours (6 pm - 6 am) take at least the night's chance; the early hours belong to the
+        // night before. Then the rain spells, the 7-9 pm line and the hour strip all agree.
+        for (int i = 0; i < f.days.size(); i++) {
+            Day d = f.days.get(i), before = i > 0 ? f.days.get(i - 1) : null;
+            for (int h = 0; h < 24; h++) {
+                Hour x = d.hours[h];
+                int night = h >= 18 ? d.night : h < 6 && before != null ? before.night : -1;
+                if (x != null && night > x.rain) x.rain = night;
+            }
+        }
+        JSONObject current = root.optJSONObject("now");
+        JSONObject cp = current == null ? null : current.optJSONObject("precipitation");
+        if (cp != null) f.rainLastHour = num(cp, "qpf", "quantity");
+        // The hour Google measured rain in counts as raining, whatever its forecast said.
+        if (f.rainLastHour >= 0.2) markRaining(f, current.optString("currentTime", null));
         for (Day d : f.days) {
             // Today only counts the hours still to come.
             d.windows = windows(d, d.today ? now[3] : 0);
@@ -298,10 +314,23 @@ final class Weather {
                 if (left >= 0) d.rain = left;
             }
         }
-        JSONObject current = root.optJSONObject("now");
-        JSONObject cp = current == null ? null : current.optJSONObject("precipitation");
-        if (cp != null) f.rainLastHour = num(cp, "qpf", "quantity");
         return f;
+    }
+
+    // "2026-10-21T14:29:38Z" (UTC): that hour in Madurai is raining (100%).
+    private static void markRaining(Forecast f, String iso) {
+        if (iso == null || iso.length() < 19) return;
+        try {
+            java.text.SimpleDateFormat in = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT);
+            in.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Calendar c = Calendar.getInstance(TimeZone.getTimeZone(TZ));
+            c.setTime(in.parse(iso.substring(0, 19)));
+            Day d = find(f, isoDate(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)));
+            Hour x = d == null ? null : d.hours[c.get(Calendar.HOUR_OF_DAY)];
+            if (x != null) x.rain = 100;
+        } catch (Exception ignored) {
+            // No time: just the "Raining now" line.
+        }
     }
 
     private static Day find(Forecast f, String date) {

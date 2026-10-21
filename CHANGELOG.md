@@ -3,6 +3,13 @@
 Releases of this fork (`viswanathanTJ/tv-detox`). Versions are the GitHub release tags; the home
 screen app's own version is in brackets.
 
+## v1.3.2 (home screen 1.6.2), 2026-10-21
+
+- **The hour-by-hour strip matches the rain.** The hour Google measured rain in shows 100%. Evening
+  and night hours (6 pm to 6 am) show at least the night forecast's chance, where Google's hourly
+  numbers had stayed under 10% on a rainy night. Rain spells, the 7–9 pm line and the day cards are
+  worked out from these same hours, so every screen agrees.
+
 ## v1.3.1 (home screen 1.6.1), 2026-10-21
 
 - **The daily weather limit only counts calls Google answered.** Before, a call counted as soon as
