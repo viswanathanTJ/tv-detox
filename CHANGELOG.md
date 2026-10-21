@@ -3,6 +3,12 @@
 Releases of this fork (`viswanathanTJ/tv-detox`). Versions are the GitHub release tags; the home
 screen app's own version is in brackets.
 
+## v1.3.1 (home screen 1.6.1), 2026-10-21
+
+- **The daily weather limit only counts calls Google answered.** Before, a call counted as soon as
+  it started, so a DNS or internet outage (like Tailscale DNS on the TV) used up the day's updates
+  and Refresh said "updates again tomorrow at 8 am". The count starts fresh with this version.
+
 ## v1.3.0 (home screen 1.6.0), 2026-10-21
 
 - **Raining now:** today's card says "Raining now" when Google's current conditions measure rain,

@@ -194,23 +194,26 @@ final class Weather {
         return new JSONObject().put("days", days).put("hours", hours).put("now", now).toString();
     }
 
-    // Calls left today, counted per day in Madurai.
+    // Calls left today, counted per day in Madurai. (Kept under new names: the first count also took
+    // calls that never reached Google, so it could run out on a day with no internet.)
     private static int budget(SharedPreferences p) {
         int[] n = now();
         String today = isoDate(n[0], n[1], n[2]);
-        return today.equals(p.getString("calls_day", "")) ? MAX_CALLS_A_DAY - p.getInt("calls", 0) : MAX_CALLS_A_DAY;
+        return today.equals(p.getString("calls_day2", "")) ? MAX_CALLS_A_DAY - p.getInt("calls2", 0) : MAX_CALLS_A_DAY;
     }
 
     private static String get(SharedPreferences p, String url) throws IOException {
         int left = budget(p);
         if (left <= 0) throw new IOException("out of calls for today");
-        int[] d = now();
-        p.edit().putString("calls_day", isoDate(d[0], d[1], d[2])).putInt("calls", MAX_CALLS_A_DAY - left + 1).commit();
         HttpURLConnection c = (HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(20000);
         try {
-            if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
+            int code = c.getResponseCode();
+            // Google answered, so it counts. Calls that never got there (no internet, no DNS) don't.
+            int[] d = now();
+            p.edit().putString("calls_day2", isoDate(d[0], d[1], d[2])).putInt("calls2", MAX_CALLS_A_DAY - left + 1).commit();
+            if (code != 200) throw new IOException("HTTP " + code);
             InputStream in = c.getInputStream();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buf = new byte[8192];
