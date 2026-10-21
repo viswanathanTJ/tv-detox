@@ -5,3 +5,5 @@ key.jks
 .idea
 weather.key
 home-config-*.txt
+.superpowers/
+__pycache__/

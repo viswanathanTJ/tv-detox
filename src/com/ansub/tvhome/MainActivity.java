@@ -115,6 +115,7 @@ public class MainActivity extends Activity {
     private String movingKey;   // the app being moved with left/right, if any
     private TextView moveHint;  // shown above the apps while moving
     private WeatherUi weather;  // clock, Tamil date, forecast and info tiles
+    private CalendarUi calendar; // the Tamil calendar, from the info tiles
     private View festivalTile, tamilTile;
     private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
     // Every minute: the date lines (so they turn over at midnight) and a forecast download when due.
@@ -170,8 +171,9 @@ public class MainActivity extends Activity {
         weather = new WeatherUi(this, scale, regular, semibold);
         weather.addHeader(root, px(MARGIN));
         weather.addWeather(root, px(MARGIN), width - 2 * px(MARGIN));
-        festivalTile = weather.festivalTile();
-        tamilTile = weather.tamilTile();
+        calendar = new CalendarUi(this, scale, regular, semibold);
+        festivalTile = weather.festivalTile(calendar::openMonth);
+        tamilTile = weather.tamilTile(calendar::openMonth);
         root.addView(festivalTile, at(0, 0, 1, 1));
         root.addView(tamilTile, at(0, 0, 1, 1));
         weather.refreshCalendar();

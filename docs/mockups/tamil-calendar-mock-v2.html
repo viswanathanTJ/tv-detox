@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tamil calendar mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&family=Noto+Sans+Tamil:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --page: #070c16; --card: #1a2742; --card2: #22335a; --text: #f4f7ff; --dim: #b8c4e0;
+    --rain: #2f7df6; --gold: #ffd166; --good: #7ee2a8; --bad: #ff7a7a; --warn: #ffb35c; --sun: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b1020; color: var(--text); font-family: Roboto, "Noto Sans Tamil", sans-serif; padding: 24px 16px 60px; }
+  .ta { font-family: "Noto Sans Tamil", Roboto, sans-serif; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+  .note { color: var(--dim); font-size: 14px; margin: 0 0 18px; }
+  .label { color: var(--dim); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; margin: 28px 0 8px; }
+  /* A 1920x1080 TV screen, scaled to the window width. */
+  .tvwrap { width: 100%; max-width: 1280px; aspect-ratio: 16 / 9; position: relative; overflow: hidden; border-radius: 10px; box-shadow: 0 10px 40px #0008; }
+  .tv { width: 1920px; height: 1080px; transform-origin: 0 0; position: absolute; top: 0; left: 0;
+        background: radial-gradient(1400px 700px at 0% 0%, #1b2d55 0%, #0c1426 55%, #070c16 100%); }
+
+  /* ---------- Month ---------- */
+  .m-head { position: absolute; left: 96px; right: 96px; top: 40px; height: 110px; display: flex; align-items: flex-end; gap: 36px; }
+  .m-title { font-size: 72px; font-weight: 700; line-height: 1; }
+  .m-sub { font-size: 30px; color: var(--gold); padding-bottom: 6px; }
+  .m-sub small { display: block; color: var(--dim); font-size: 24px; margin-top: 4px; }
+  .m-nav { margin-left: auto; display: flex; gap: 14px; padding-bottom: 8px; }
+  .pill { background: #ffffff14; border: 2px solid #ffffff1c; border-radius: 40px; padding: 10px 26px; font-size: 24px; color: var(--dim); }
+  .grid { position: absolute; left: 96px; right: 96px; top: 176px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 14px; }
+  .wd { text-align: center; font-size: 24px; color: var(--dim); padding: 6px 0 4px; }
+  .wd.sun { color: var(--sun); }
+  .cell { height: 134px; background: var(--card); border-radius: 18px; padding: 12px 16px; position: relative; border: 2px solid transparent; }
+  .cell.empty { background: transparent; }
+  .cell .en { font-size: 50px; font-weight: 700; line-height: 1; }
+  .cell.sunday .en { color: var(--sun); }
+  .cell .tn { position: absolute; right: 16px; top: 14px; font-size: 22px; color: var(--gold); font-weight: 500; }
+  .cell .tn.m1 { background: var(--gold); color: #1a1200; border-radius: 8px; padding: 1px 8px; font-size: 18px; }
+  .cell .ev { position: absolute; left: 16px; right: 12px; bottom: 10px; font-size: 19px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .ev b { color: var(--text); font-weight: 600; }
+  .dot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+  .dot.full { background: #fff6cf; } .dot.new { background: #111; border: 2px solid #8a94ad; }
+  .cell.fest { background: #3a2a10; } .cell.fest .ev b { color: var(--gold); }
+  .cell.today { background: var(--card2); }
+  .cell.focus { border-color: #fff; transform: scale(1.08); box-shadow: 0 18px 40px #000a; z-index: 2; }
+  .hint { position: absolute; left: 96px; bottom: 26px; font-size: 22px; color: var(--dim); }
+  .legend { position: absolute; right: 96px; bottom: 26px; font-size: 22px; color: var(--dim); display: flex; gap: 26px; }
+
+  /* ---------- Day: one grid, every block has its own cell ---------- */
+  #day { display: grid; padding: 56px 96px 36px; gap: 26px 28px;
+         grid-template-columns: 500px 1fr 1fr; grid-template-rows: 1fr auto auto; }
+  .d-left { grid-row: 1 / 3; display: flex; flex-direction: column; min-width: 0; }
+  .d-big { font-size: 220px; font-weight: 900; line-height: .86; letter-spacing: -6px; }
+  .d-wk { font-size: 40px; font-weight: 500; margin-top: 18px; }
+  .d-ta { font-size: 46px; color: var(--gold); font-weight: 700; margin-top: 12px; }
+  .d-yr { font-size: 24px; color: var(--dim); margin-top: 8px; line-height: 1.5; }
+  .d-fest { margin-top: auto; background: #3a2a10; border: 2px solid #6b4d16; border-radius: 22px; padding: 20px 26px; }
+  .d-fest .t { font-size: 34px; color: var(--gold); font-weight: 700; }
+  .d-fest .s { font-size: 22px; color: var(--dim); margin-top: 6px; }
+  .d-sun { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .d-sun div { background: var(--card); border-radius: 18px; padding: 14px 20px; font-size: 22px; color: var(--dim); }
+  .d-sun b { display: block; font-size: 32px; color: var(--text); margin-top: 2px; }
+
+  .panel { background: var(--card); border-radius: 24px; padding: 24px 30px; min-width: 0; display: flex; flex-direction: column; }
+  .panel h3 { margin: 0 0 6px; font-size: 20px; letter-spacing: .1em; color: var(--dim); font-weight: 500; }
+  .row { display: grid; grid-template-columns: 170px 1fr; align-items: center; flex: 1; border-top: 1px solid #ffffff12; }
+  .panel h3 + .row, .panel h3 + .time { border-top: 0; }
+  .row .k { font-size: 26px; color: var(--dim); }
+  .row .v { font-size: 34px; font-weight: 700; white-space: nowrap; min-width: 0; overflow: hidden; }
+  .row .v .pk { font-size: 22px; font-weight: 500; color: var(--gold); background: #ffd16622; border-radius: 8px; padding: 2px 10px; vertical-align: 6px; margin-left: 8px; }
+  .row .v small { display: block; font-size: 22px; color: var(--dim); font-weight: 400; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .v small b { color: var(--text); font-weight: 600; }
+  .time { display: grid; grid-template-columns: 12px 1fr auto; column-gap: 20px; align-items: center; flex: 1; border-top: 1px solid #ffffff12; }
+  .time .tag { width: 12px; height: 52px; border-radius: 6px; }
+  .time .k { font-size: 26px; white-space: nowrap; }
+  .time .k small { display: block; font-size: 19px; color: var(--dim); margin-top: 2px; }
+  .time .v { font-size: 30px; font-weight: 700; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .time .v span { display: block; font-size: 24px; opacity: .85; }
+  .g .tag { background: var(--good); } .g .v { color: var(--good); }
+  .b .tag { background: var(--bad); } .b .v { color: var(--bad); }
+  .w .tag { background: var(--warn); } .w .v { color: var(--warn); }
+  .chips { grid-column: 2 / 4; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .chip { background: var(--card); border-radius: 20px; padding: 18px 24px; min-width: 0; }
+  .chip .k { font-size: 20px; color: var(--dim); }
+  .chip .v { font-size: 30px; font-weight: 700; margin-top: 6px; white-space: nowrap; }
+  .chip .s { font-size: 21px; color: var(--dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d-hint { grid-column: 1 / 4; display: flex; gap: 14px; align-items: center; }
+  .d-hint .pill.f { background: #fff; color: #0b1020; border-color: #fff; font-weight: 700; }
+  .d-hint .src { margin-left: auto; font-size: 20px; color: var(--dim); }
+</style>
+</head>
+<body>
+<h1>Tamil calendar on the TV — mock v2</h1>
+<p class="note">Sample values for October 2026, Munichalai. Each frame is the real 1920×1080 TV screen, scaled down. Dark navy and gold match your current home screen.</p>
+
+<div class="label">1 · Month view (opened from the Tamil date tile or a new “Calendar” tile)</div>
+<div class="tvwrap"><div class="tv" id="month">
+  <div class="m-head">
+    <div class="m-title">October 2026</div>
+    <div class="m-sub ta">புரட்டாசி – ஐப்பசி<small>பராபவ வருடம் · Parabhava</small></div>
+    <div class="m-nav"><span class="pill">◀ Sep</span><span class="pill">Today</span><span class="pill">Nov ▶</span></div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="hint">◀ ▲ ▼ ▶ move · OK open the day · CH+/CH− change month · Back home</div>
+  <div class="legend"><span><span class="dot full"></span>Pournami</span><span><span class="dot new"></span>Amavasai</span><span style="color:var(--gold)">■ Festival</span></div>
+</div></div>
+
+<div class="label">2 · Day view (OK on any date)</div>
+<div class="tvwrap"><div class="tv" id="day">
+  <div class="d-left">
+    <div class="d-big">21</div>
+    <div class="d-wk">Wednesday, October 2026</div>
+    <div class="d-ta ta">ஐப்பசி 4 · புதன்</div>
+    <div class="d-yr ta">பராபவ வருடம் · தட்சிணாயனம்<br>சரத் ருது</div>
+    <div class="d-fest"><div class="t ta">வித்யாரம்பம்</div><div class="s">Vidyarambham · ஏகாதசி tomorrow</div></div>
+    <div class="d-sun"><div>Sunrise<b>6:06 am</b></div><div>Sunset<b>5:57 pm</b></div></div>
+  </div>
+
+  <div class="panel">
+    <h3>பஞ்சாங்கம் · PANCHANGAM</h3>
+    <div class="row"><div class="k ta">திதி</div><div class="v ta">தசமி <span class="pk">வளர்பிறை</span><small>till 11:05 am, then <b>ஏகாதசி</b></small></div></div>
+    <div class="row"><div class="k ta">நட்சத்திரம்</div><div class="v ta">சதயம்<small>till 2:10 pm, then <b>பூரட்டாதி</b></small></div></div>
+    <div class="row"><div class="k ta">யோகம்</div><div class="v ta">கண்டம்<small>till 4:40 pm, then <b>விருத்தி</b></small></div></div>
+    <div class="row"><div class="k ta">கரணம்</div><div class="v ta">தைதுலை<small>till 11:05 am, then <b>கரசை</b></small></div></div>
+    <div class="row"><div class="k ta">ராசி</div><div class="v ta">கும்பம்<small>Moon in Kumbam all day</small></div></div>
+  </div>
+
+  <div class="panel">
+    <h3>நேரம் · TIMES TODAY</h3>
+    <div class="time g"><span class="tag"></span><div class="k ta">நல்ல நேரம்<small>Nalla neram</small></div><div class="v">9:30–10:30 am<span>4:30–5:30 pm</span></div></div>
+    <div class="time g"><span class="tag"></span><div class="k ta">கௌரி நேரம்<small>Gowri nalla neram</small></div><div class="v">10:30–11:30 am<span>6:30–7:30 pm</span></div></div>
+    <div class="time b"><span class="tag"></span><div class="k ta">இராகு காலம்<small>Raagu kalam</small></div><div class="v">12:00–1:30 pm</div></div>
+    <div class="time b"><span class="tag"></span><div class="k ta">எமகண்டம்<small>Yamagandam</small></div><div class="v">7:30–9:00 am</div></div>
+    <div class="time w"><span class="tag"></span><div class="k ta">குளிகை<small>Kuligai</small></div><div class="v">10:30–12:00 pm</div></div>
+  </div>
+
+  <div class="chips">
+    <div class="chip"><div class="k ta">சூலம் · Soolam</div><div class="v ta">வடக்கு</div><div class="s ta">பரிகாரம்: பால்</div></div>
+    <div class="chip"><div class="k ta">சந்திராஷ்டமம்</div><div class="v ta">கடகம்</div><div class="s ta">புனர்பூசம் 4, பூசம், ஆயில்யம்</div></div>
+    <div class="chip"><div class="k ta">இம்மாதம் · This month</div><div class="v ta">கரி நாள் 3, 16, 23</div><div class="s ta">வாஸ்து நாள் 28</div></div>
+  </div>
+
+  <div class="d-hint">
+    <span class="pill">◀ 20 Oct</span><span class="pill f">Month</span><span class="pill">22 Oct ▶</span>
+    <span class="src">Computed on the TV for Munichalai · times approximate (±30 min)</span>
+  </div>
+</div></div>
+
+<script>
+  // Scale each 1920x1080 frame to its container.
+  function fit() { document.querySelectorAll('.tvwrap').forEach(w => { w.firstElementChild.style.transform = 'scale(' + (w.clientWidth / 1920) + ')'; }); }
+  addEventListener('resize', fit);
+
+  // Month grid: Oct 2026 starts on Thursday. Tamil dates and events from the printed sheet you shared.
+  const wds = ['ஞாயிறு','திங்கள்','செவ்வாய்','புதன்','வியாழன்','வெள்ளி','சனி'];
+  const tamil = {1:14,2:15,3:16,4:17,5:18,6:19,7:20,8:21,9:22,10:23,11:24,12:25,13:26,14:27,15:28,16:29,17:30,
+                 18:1,19:2,20:3,21:4,22:5,23:6,24:7,25:8,26:9,27:10,28:11,29:12,30:13,31:14};
+  const ev = {2:['f','காந்தி ஜெயந்தி'],3:['','திருவாதிரை'],4:['','நவமி'],6:['','ஏகாதசி'],8:['','பிரதோஷம்'],
+              9:['','மாத சிவராத்திரி'],10:['new','மஹாளய அமாவாசை'],11:['f','நவராத்திரி ஆரம்பம்'],12:['','சந்திர தரிசனம்'],
+              14:['','சதுர்த்தி'],16:['','ஷஷ்டி'],19:['f','சரஸ்வதி பூஜை'],20:['f','விஜய தசமி'],21:['','வித்யாரம்பம்'],
+              22:['','ஏகாதசி'],23:['','பிரதோஷம்'],25:['full','பௌர்ணமி'],27:['','கார்த்திகை'],28:['','வாஸ்து நாள்'],
+              29:['','சங்கடஹர சதுர்த்தி'],31:['','திருவாதிரை']};
+  const g = document.getElementById('grid');
+  wds.forEach((w,i) => g.insertAdjacentHTML('beforeend', `<div class="wd ta ${i==0?'sun':''}">${w}</div>`));
+  for (let i = 0; i < 4; i++) g.insertAdjacentHTML('beforeend', '<div class="cell empty"></div>');
+  for (let d = 1; d <= 31; d++) {
+    const col = (3 + d) % 7, e = ev[d], t = tamil[d];
+    let cls = 'cell' + (col == 0 ? ' sunday' : '') + (e && e[0]=='f' ? ' fest' : '') + (d==21 ? ' today focus' : '');
+    let evHtml = e ? `<div class="ev ta">${e[0]=='full'?'<span class="dot full"></span>':e[0]=='new'?'<span class="dot new"></span>':''}<b>${e[1]}</b></div>` : '';
+    let tn = t == 1 ? `<span class="tn m1 ta">ஐப்பசி 1</span>` : `<span class="tn">${t}</span>`;
+    g.insertAdjacentHTML('beforeend', `<div class="${cls}"><div class="en">${d}</div>${tn}${evHtml}</div>`);
+  }
+  fit();
+</script>
+</body>
+</html>

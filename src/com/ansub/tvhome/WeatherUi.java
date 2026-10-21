@@ -119,28 +119,31 @@ final class WeatherUi {
         showForecast(null);
     }
 
-    // Next festival or holiday, from the bundled list. View only.
-    View festivalTile() {
+    // Next festival or holiday, from the bundled list. OK runs open (the Tamil calendar).
+    View festivalTile(Runnable open) {
         festName = line(30, TEXT, semibold);
         festWhen = line(26, DIM, regular);
-        return infoTile(festName, festWhen);
+        return infoTile(festName, festWhen, open);
     }
 
-    // Next Amavasai, Pournami or Tamil month start. View only.
-    View tamilTile() {
+    // Next Amavasai, Pournami or Tamil month start. OK runs open (the Tamil calendar).
+    View tamilTile(Runnable open) {
         tamilName = line(30, GOLD, tamilBold);
         tamilWhen = line(26, DIM, regular);
-        return infoTile(tamilName, tamilWhen);
+        return infoTile(tamilName, tamilWhen, open);
     }
 
-    private View infoTile(TextView top, TextView bottom) {
+    private View infoTile(TextView top, TextView bottom, Runnable open) {
         LinearLayout t = new LinearLayout(a);
         t.setOrientation(LinearLayout.VERTICAL);
         t.setGravity(Gravity.CENTER_VERTICAL);
         t.setPadding(px(28), 0, px(28), 0);
-        t.setBackground(rounded(CARD, 20, 0, 0));
+        GradientDrawable bg = rounded(CARD, 20, 0, 0);
+        t.setBackground(bg);
         t.addView(top, new LinearLayout.LayoutParams(-1, px(46)));
         t.addView(bottom, new LinearLayout.LayoutParams(-1, px(40)));
+        focusStyle(t, bg, 0, 0, 1f);
+        t.setOnClickListener(v -> open.run());
         return t;
     }
 
@@ -150,7 +153,7 @@ final class WeatherUi {
         int y = now[0], m = now[1], d = now[2], wd = TamilDate.weekday(y, m, d);
         if (dateEn != null) dateEn.setText(TamilDate.WEEKDAYS_EN[wd] + ", " + d + " " + MONTHS[m - 1] + " " + y);
         try {
-            TamilDate.Day t = TamilDate.of(y, m, d);
+            TamilDate.Day t = Panchang.of(y, m, d).tamil; // Vakya, like the calendar pages
             if (dateTa != null) dateTa.setText(TamilDate.WEEKDAYS_TA[wd] + " · " + t.ta()
                     + (t.event != TamilDate.NONE && t.event != TamilDate.MONTH_START ? " · " + t.eventTa() : ""));
         } catch (Throwable e) {
@@ -169,18 +172,30 @@ final class WeatherUi {
         }
         if (tamilName != null) {
             int[] e = null;
-            try { e = TamilDate.nextEvent(y, m, d); } catch (Throwable ignored) {}
+            try { e = nextEvent(y, m, d); } catch (Throwable ignored) {}
             if (e == null) {
                 tamilName.setText("தமிழ் நாள்");
                 tamilWhen.setText("Not available");
             } else {
                 long days = TamilDate.epochDay(e[0], e[1], e[2]) - TamilDate.epochDay(y, m, d);
                 String month = "";
-                if (e[3] == TamilDate.MONTH_START) month = " · " + TamilDate.of(e[0], e[1], e[2]).ta();
+                if (e[3] == TamilDate.MONTH_START) month = " · " + Panchang.of(e[0], e[1], e[2]).tamil.ta();
                 tamilName.setText(TamilDate.EVENTS_TA[e[3]] + month);
                 tamilWhen.setText(TamilDate.EVENTS_EN[e[3]] + " · " + shortDate(e[0], e[1], e[2]) + " · " + inDays(days));
             }
         }
+    }
+
+    // The first Amavasai, Pournami or Tamil month start on or after the date, within 40 days, by the same
+    // panchangam the calendar shows: {year, month, day, event}, or null.
+    private static int[] nextEvent(int y, int m, int d) {
+        long ed = TamilDate.epochDay(y, m, d);
+        for (int i = 0; i <= 40; i++) {
+            int[] c = TamilDate.civil(ed + i);
+            TamilDate.Day t = Panchang.of(c[0], c[1], c[2]).tamil;
+            if (t.event != TamilDate.NONE) return new int[] {c[0], c[1], c[2], t.event};
+        }
+        return null;
     }
 
     // Shows a forecast, or the "not available" line for null.
