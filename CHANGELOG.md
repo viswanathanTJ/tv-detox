@@ -3,6 +3,20 @@
 Releases of this fork (`viswanathanTJ/tv-detox`). Versions are the GitHub release tags; the home
 screen app's own version is in brackets.
 
+## v1.3.0 (home screen 1.6.0), 2026-10-21
+
+- **Raining now:** today's card says "Raining now" when Google's current conditions measure rain,
+  even if the hourly forecast missed it.
+- **7–9 pm and today's rain chance:** these use the higher of the hourly forecast and the night
+  forecast. Google's hourly numbers can stay low on a night its own night forecast calls rainy. A day
+  card turns blue when 7–9 pm is likely to be rainy. The full-day page (summary, the line under the
+  date, the hour-by-hour heading and the day chips) uses the same rule.
+- **Refresh button** (the round arrow at the top right) downloads the weather at once. Left and
+  right now stay in that row of icons.
+- **Weather updates at 8 am, 2 pm and 6 pm** instead of every 6 hours. Each update is still 6 calls:
+  1 for the days, 4 pages of hours, and 1 for current conditions. With the cap of 30 calls a day,
+  that leaves room for two presses of Refresh.
+
 ## v1.2.0 (home screen 1.5.0), 2026-10-21
 
 ### Tamil calendar

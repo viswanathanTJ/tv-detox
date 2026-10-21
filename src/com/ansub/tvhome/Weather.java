@@ -19,10 +19,11 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 // The 5-day forecast for one place, from the Google Weather API (needs a key, see key()). Fetched on a
-// background thread at most every 6 hours (a failed try is retried after an hour), and the last good
-// answer is kept in SharedPreferences, so the home screen still shows it when the TV is offline.
-// The key allows 1,000 calls a month and one refresh is 6 calls (1 daily, 5 pages of 24 hours), so
-// that's at most 4 refreshes (24 calls) a day, and never more than MAX_CALLS_A_DAY whatever happens.
+// background thread at 8 am, 2 pm and 6 pm (the first time the home screen looks after each; a failed
+// try is retried after an hour), or when Refresh is pressed. The last good answer is kept in
+// SharedPreferences, so the home screen still shows it when the TV is offline.
+// The key allows 1,000 calls a month and one refresh is 6 calls (1 daily, 5 pages of 24 hours): the
+// three a day take 18, leaving room for two presses of Refresh under MAX_CALLS_A_DAY.
 final class Weather {
     // Munichalai, Madurai, PIN 625009.
     static final String PLACE = "Madurai";
@@ -30,8 +31,11 @@ final class Weather {
     static final String TZ = "Asia/Kolkata";
     static final String API = "https://weather.googleapis.com/v1/forecast/";
     static final String WHERE = "location.latitude=" + LAT + "&location.longitude=" + LON + "&unitsSystem=METRIC";
-    static final int DAYS = 5, HOURS = 120; // hours come 24 to a page
-    static final long REFRESH_MS = 6 * 60 * 60 * 1000L, RETRY_MS = 60 * 60 * 1000L;
+    // Hours come 24 to a page: four pages, plus the days and the current conditions, keep a refresh at
+    // 6 calls. The fifth day's evening falls back on its night forecast (see eveningRain).
+    static final int DAYS = 5, HOURS = 96;
+    static final int[] SLOTS = {8 * 60, 14 * 60, 18 * 60}; // refresh times, minutes after midnight IST
+    static final long RETRY_MS = 60 * 60 * 1000L;
     static final int MAX_CALLS_A_DAY = 30; // 30 x 31 days = 930, under the 1,000 a month
     static final int RAIN_PCT = 40; // an hour at or above this chance of rain counts as rainy
     static final int EVENING_FROM = 19, EVENING_TO = 21; // 7–9 pm, shown first on the home screen
@@ -50,6 +54,7 @@ final class Weather {
         int y, m, d, weekday; // weekday 0 = Sunday
         double max = Double.NaN, min = Double.NaN, uv = Double.NaN;
         int rain = -1, code = -1;
+        int night = -1; // chance of rain in the night forecast (6 pm - 6 am), or -1
         String sunrise, sunset; // "6:01 am", or null
         final Hour[] hours = new Hour[24]; // entries can be null
         List<int[]> windows = new ArrayList<>(); // rainy spells {from, to}, to exclusive
@@ -61,6 +66,14 @@ final class Weather {
     static final class Forecast {
         final List<Day> days = new ArrayList<>();
         long fetchedAt;
+        // Rain measured in the hour before the download (current conditions), mm; NaN if unknown.
+        double rainLastHour = Double.NaN;
+
+        // Raining when the forecast was fetched, by Google's own measurement: the hourly forecast can
+        // miss a shower that's already falling.
+        boolean rainingNow() {
+            return rainLastHour >= 0.2 && System.currentTimeMillis() - fetchedAt < 2 * 60 * 60 * 1000L;
+        }
     }
 
     private Weather() {}
@@ -76,29 +89,67 @@ final class Weather {
         return String.format(Locale.ROOT, "%04d-%02d-%02d", y, m, d);
     }
 
-    // Starts a download if the saved forecast is old; done runs on the main thread when it finishes.
+    interface Result { void done(String message); }
+
+    // Starts a download if none has been made since the latest refresh time; done runs on the main
+    // thread when it finishes.
     static void maybeFetch(Context context, final Runnable done) {
-        final Context app = context.getApplicationContext();
+        Context app = context.getApplicationContext();
         long t = System.currentTimeMillis();
-        SharedPreferences p = app.getSharedPreferences(PREFS, 0);
-        long at = p.getLong("at", 0);
-        if (running || (t - at >= 0 && t - at < REFRESH_MS) || (lastTry != 0 && t - lastTry < RETRY_MS)) return;
+        long at = app.getSharedPreferences(PREFS, 0).getLong("at", 0);
+        if (running || at >= lastSlot(t) || (lastTry != 0 && t - lastTry < RETRY_MS)) return;
+        fetch(app, m -> { if (done != null) done.run(); });
+    }
+
+    // The Refresh button: downloads now, whatever the time, within the day's calls. done gets a line
+    // to show: updated, out of calls for today, or couldn't update.
+    static void refreshNow(Context context, Result done) {
+        if (running) { done.done("Updating the weather…"); return; }
+        fetch(context.getApplicationContext(), done);
+    }
+
+    private static void fetch(final Context app, final Result done) {
         running = true;
-        lastTry = t;
+        lastTry = System.currentTimeMillis();
         final Handler main = new Handler(Looper.getMainLooper());
         new Thread(() -> {
+            String message;
             try {
                 String json = download(app.getSharedPreferences(PREFS, 0), key(app));
                 app.getSharedPreferences(PREFS, 0).edit()
                         .putString("json", json).putLong("at", System.currentTimeMillis()).apply();
-            } catch (Throwable ignored) {
+                message = "Weather updated";
+            } catch (Throwable e) {
                 // Offline or a bad answer: keep the last good forecast.
+                android.util.Log.w("tvhome", "Weather download failed: " + e);
+                message = String.valueOf(e.getMessage()).contains("out of calls")
+                        ? "Weather: today's updates are used up. It updates again tomorrow at 8 am."
+                        : "Couldn't update the weather. Check the internet and try again.";
             }
+            final String m = message;
             main.post(() -> {
                 running = false;
-                if (done != null) done.run();
+                done.done(m);
             });
         }, "weather").start();
+    }
+
+    // The latest refresh time at or before t (today's, or yesterday's 6 pm before 8 am), epoch millis.
+    static long lastSlot(long t) {
+        Calendar c = Calendar.getInstance(TimeZone.getTimeZone(TZ));
+        c.setTimeInMillis(t);
+        int now = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE);
+        int slot = -1;
+        for (int s : SLOTS) if (s <= now) slot = s;
+        if (slot < 0) {
+            c.add(Calendar.DAY_OF_MONTH, -1);
+            slot = SLOTS[SLOTS.length - 1];
+        }
+        c.set(Calendar.HOUR_OF_DAY, slot / 60);
+        c.set(Calendar.MINUTE, slot % 60);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
     }
 
     // Both answers in one object: {"days": [...forecastDays], "hours": [...forecastHours]}.
@@ -125,6 +176,7 @@ final class Weather {
     private static String download(SharedPreferences p, String apiKey) throws Exception {
         if (apiKey.isEmpty()) throw new IOException("no API key");
         if (budget(p) < 6) throw new IOException("out of calls for today"); // don't start what can't finish
+        // 1 days + 4 hours pages + 1 current conditions = 6 calls.
         String key = "&key=" + apiKey;
         JSONArray days = new JSONObject(get(p, API + "days:lookup?" + WHERE + "&days=" + DAYS + "&pageSize=" + DAYS + key))
                 .getJSONArray("forecastDays"); // only keep an answer that looks right
@@ -137,7 +189,9 @@ final class Weather {
             for (int i = 0; a != null && i < a.length(); i++) hours.put(a.get(i));
             page = o.optString("nextPageToken", "");
         } while (!page.isEmpty() && hours.length() < HOURS);
-        return new JSONObject().put("days", days).put("hours", hours).toString();
+        JSONObject now = new JSONObject(get(p, "https://weather.googleapis.com/v1/currentConditions:lookup?"
+                + WHERE + key));
+        return new JSONObject().put("days", days).put("hours", hours).put("now", now).toString();
     }
 
     // Calls left today, counted per day in Madurai.
@@ -203,7 +257,8 @@ final class Weather {
             d.max = num(g, "maxTemperature", "degrees");
             d.min = num(g, "minTemperature", "degrees");
             d.uv = day == null ? Double.NaN : day.optDouble("uvIndex", Double.NaN);
-            d.rain = Math.max(rain(day), rain(night));
+            d.night = rain(night);
+            d.rain = Math.max(rain(day), d.night);
             d.code = code(day);
             JSONObject sun = g.optJSONObject("sunEvents");
             if (sun != null) {
@@ -234,11 +289,15 @@ final class Weather {
             // Today only counts the hours still to come.
             d.windows = windows(d, d.today ? now[3] : 0);
             if (d.today) {
-                int left = -1;
+                // What's left of today: the hours to come, and tonight's forecast (often wetter).
+                int left = d.night;
                 for (int h = now[3]; h < 24; h++) if (d.hours[h] != null) left = Math.max(left, d.hours[h].rain);
                 if (left >= 0) d.rain = left;
             }
         }
+        JSONObject current = root.optJSONObject("now");
+        JSONObject cp = current == null ? null : current.optJSONObject("precipitation");
+        if (cp != null) f.rainLastHour = num(cp, "qpf", "quantity");
         return f;
     }
 
@@ -247,9 +306,13 @@ final class Weather {
         return null;
     }
 
-    // The highest chance of rain from 7 to 9 pm (today: only the hours still to come), or -1 without data.
+    // The chance of rain from 7 to 9 pm, or -1 without data or once it's past: the higher of the hourly
+    // forecast and the night forecast. Google's hourly numbers can stay low on a night its own night
+    // forecast (and other providers) call rainy, and a missed shower is worse than a dry evening.
     static int eveningRain(Day d) {
-        int from = d.today ? Math.max(EVENING_FROM, now()[3]) : EVENING_FROM, max = -1;
+        int hour = now()[3];
+        if (d.today && hour >= EVENING_TO) return -1;
+        int from = d.today ? Math.max(EVENING_FROM, hour) : EVENING_FROM, max = d.night;
         for (int h = from; h < EVENING_TO; h++) if (d.hours[h] != null) max = Math.max(max, d.hours[h].rain);
         return max;
     }

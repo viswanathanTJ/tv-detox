@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private static final String ADD = "add";
     // AdGuard DNS on or off: switches the TV's Private DNS. Needs WRITE_SECURE_SETTINGS (see README).
     private static final String ADGUARD = "adguard";
+    private static final String REFRESH = "refresh_weather"; // the Refresh button by the clock
     // Opens a list of every installed app.
     private static final String ALL_APPS = "allapps";
     private static final String ADGUARD_HOST = "dns.adguard-dns.com";
@@ -209,7 +210,7 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    // Date lines, info tiles, and a forecast download when the saved one is 30 minutes old.
+    // Date lines, info tiles, and a forecast download at 8 am, 2 pm and 6 pm.
     private void refreshDay() {
         try { weather.refreshCalendar(); } catch (Throwable ignored) {}
         fetchWeather();
@@ -477,15 +478,26 @@ public class MainActivity extends Activity {
         int ib = px(ICON_BUTTON), ig = px(ICON_GAP);
         // The last icon's right edge lines up with the apps' (its focus circle sticks out past them).
         int qx = getResources().getDisplayMetrics().widthPixels - m + (ib - px(ICON_SIZE)) / 2
-                - (quick.size() + 2) * ib - (quick.size() + 1) * ig;
+                - (quick.size() + 3) * ib - (quick.size() + 2) * ig;
+        List<View> row = new ArrayList<>();
         for (int q : quick) {
-            addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx);
+            row.add((View) addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx).getParent());
             qx += ib + ig;
         }
+        // Refresh: downloads the weather now (it also updates by itself at 8 am, 2 pm and 6 pm).
+        row.add((View) addIcon(REFRESH, "Refresh weather", new LineIcon(LineIcon.REFRESH), qx).getParent());
+        qx += ib + ig;
         // The Apps button: opens the list of every installed app.
-        addIcon(ALL_APPS, "All apps", new LineIcon(LineIcon.APPS), qx);
+        row.add((View) addIcon(ALL_APPS, "All apps", new LineIcon(LineIcon.APPS), qx).getParent());
         qx += ib + ig;
         netIcon = addIcon(NETWORK, Strings.t("Network"), null, qx);
+        row.add((View) netIcon.getParent());
+        // Left and right stay in this row: left of an icon is the icon beside it, not the day card below.
+        for (View v : row) v.setId(View.generateViewId());
+        for (int i = 0; i < row.size(); i++) {
+            if (i > 0) row.get(i).setNextFocusLeftId(row.get(i - 1).getId());
+            if (i < row.size() - 1) row.get(i).setNextFocusRightId(row.get(i + 1).getId());
+        }
         netState = -1;
         refreshNetwork();
 
@@ -708,6 +720,19 @@ public class MainActivity extends Activity {
     }
 
     private void open(String key) {
+        if (REFRESH.equals(key)) {
+            final android.widget.Toast busy = android.widget.Toast.makeText(this, "Updating the weather…",
+                    android.widget.Toast.LENGTH_SHORT);
+            busy.show();
+            Weather.refreshNow(this, message -> {
+                weather.showForecast(Weather.load(this));
+                busy.cancel(); // else the result can be dropped while this one still shows
+                android.util.Log.i("tvhome", "Refresh: " + message);
+                ticker.postDelayed(() -> android.widget.Toast.makeText(this, message,
+                        android.widget.Toast.LENGTH_LONG).show(), 400);
+            });
+            return;
+        }
         if (ADGUARD.equals(key)) {
             toggleAdGuard();
             return;

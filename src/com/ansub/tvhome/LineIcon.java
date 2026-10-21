@@ -36,6 +36,8 @@ final class LineIcon extends Drawable {
     static final int[] PICTURE ={0, 30, 50, 1, 210, 50, 1, 210, 165, 1, 30, 165, 2, 0, 120, 165, 1, 120, 200,
             0, 80, 200, 1, 160, 200};
 
+    // Refresh: a circle of arrow, open at the top, with its head at the left end.
+    static final int[] REFRESH = {4, 120, 120, 70, -60, 300, 0, 70, 93, 1, 85, 59, 1, 48, 55};
     // A TV: screen, antenna and two feet.
     static final int[] TV = {0, 25, 75, 1, 215, 75, 1, 215, 190, 1, 25, 190, 2, 0, 85, 25, 1, 120, 70, 1, 155, 25,
             0, 60, 190, 1, 50, 215, 0, 180, 190, 1, 190, 215};

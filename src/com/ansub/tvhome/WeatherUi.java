@@ -228,8 +228,10 @@ final class WeatherUi {
         LinearLayout c = new LinearLayout(a);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(px(22), px(14), px(18), px(12));
-        int bgColor = d.wet() ? WET_BG : d.today ? CARD2 : CARD;
-        GradientDrawable bg = rounded(bgColor, 20, d.wet() ? RAIN : 0, d.wet() ? 3 : 0);
+        // Blue when it rains: a rainy spell in the hours, 7-9 pm likely, or raining now.
+        boolean wet = rainy(d);
+        int bgColor = wet ? WET_BG : d.today ? CARD2 : CARD;
+        GradientDrawable bg = rounded(bgColor, 20, wet ? RAIN : 0, wet ? 3 : 0);
         c.setBackground(bg);
 
         // Top: the day and date on the left, the weather icon on the right.
@@ -252,7 +254,9 @@ final class WeatherUi {
         // 7–9 pm comes first: rain then, with its chance. If it's dry then, say so, and show the day's
         // first other rain time under it. Without hourly data for 7–9 pm, just the first rain time.
         int evening = Weather.eveningRain(d);
-        if (evening >= Weather.RAIN_PCT) {
+        if (d.today && forecast.rainingNow()) {
+            c.addView(rainRow("Raining now", 32), rowParams());
+        } else if (evening >= Weather.RAIN_PCT) {
             c.addView(rainRow("7–9 PM · " + evening + "%", 32), rowParams());
         } else if (evening >= 0) {
             LinearLayout two = new LinearLayout(a);
@@ -277,7 +281,7 @@ final class WeatherUi {
         tempsLp.topMargin = px(14);
         c.addView(temps, tempsLp);
 
-        focusStyle(c, bg, d.wet() ? RAIN : 0, d.wet() ? 3 : 0, 1f);
+        focusStyle(c, bg, wet ? RAIN : 0, wet ? 3 : 0, 1f);
         c.setOnClickListener(v -> openDay(index));   // straight to the full-day data, no hourly grid
         return c;
     }
@@ -335,7 +339,9 @@ final class WeatherUi {
         titles.addView(title, new LinearLayout.LayoutParams(-1, px(62)));
         TextView sub = line(26, DIM, regular);
         sub.setText("Max " + Weather.temp(d.max) + " · Min " + Weather.temp(d.min) + " · "
-                + (d.wet() ? "Rain " + d.rain + "%, " + spell(d.windows.get(0))
+                + (d.today && forecast.rainingNow() ? "Raining now · rain " + d.rain + "%"
+                : d.wet() ? "Rain " + d.rain + "%, " + spell(d.windows.get(0))
+                : rainy(d) ? "Rain " + d.rain + "%, likely tonight"
                 : "Rain " + (d.rain >= 0 ? d.rain + "%" : "–") + ", not expected"));
         titles.addView(sub, new LinearLayout.LayoutParams(-1, px(40)));
         head.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -502,7 +508,7 @@ final class WeatherUi {
         side.setOrientation(LinearLayout.VERTICAL);
         side.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         side.setPaddingRelative(px(24), 0, 0, 0);
-        TextView summary = text(30, d.wet() ? RAIN_TEXT : TEXT, semibold);
+        TextView summary = text(30, rainy(d) ? RAIN_TEXT : TEXT, semibold);
         summary.setText(summary(d));
         summary.setMaxLines(3);
         summary.setEllipsize(TextUtils.TruncateAt.END);
@@ -519,7 +525,9 @@ final class WeatherUi {
         List<String> wins = new ArrayList<>();
         for (int[] win : d.windows) wins.add(Weather.window(win));
         TextView h3 = line(28, DIM, semibold);
-        h3.setText("HOUR BY HOUR   ·   " + (wins.isEmpty() ? "no rain window" : "rain " + TextUtils.join(", ", wins)));
+        h3.setText("HOUR BY HOUR   ·   " + (!wins.isEmpty() ? "rain " + TextUtils.join(", ", wins)
+                : d.today && forecast.rainingNow() ? "raining now; the hourly forecast misses it"
+                : rainy(d) ? "hourly chances low, but rain likely tonight" : "no rain window"));
         hourly.addView(h3, new LinearLayout.LayoutParams(-1, px(36)));
         LinearLayout hrow = new LinearLayout(a);
         hrow.setOrientation(LinearLayout.HORIZONTAL);
@@ -686,8 +694,17 @@ final class WeatherUi {
         return c;
     }
 
-    private static String summary(Weather.Day d) {
-        String s = d.code >= 0 ? Weather.describe(d.code) + ". " : "";
+    // Rainy by any measure: a rainy spell in the hours, 7-9 pm likely (hourly or night forecast), or
+    // raining today when the forecast was fetched.
+    private boolean rainy(Weather.Day d) {
+        return d.wet() || Weather.eveningRain(d) >= Weather.RAIN_PCT || (d.today && forecast.rainingNow());
+    }
+
+    private String summary(Weather.Day d) {
+        String s = d.today && forecast.rainingNow() ? "Raining now. "
+                : d.code >= 0 ? Weather.describe(d.code) + ". " : "";
+        int evening = Weather.eveningRain(d);
+        if (!d.wet() && evening >= Weather.RAIN_PCT) return s + "Rain likely in the evening and night (" + evening + "%).";
         if (d.wet()) {
             List<String> w = new ArrayList<>();
             for (int[] win : d.windows) w.add(spell(win));
@@ -730,9 +747,9 @@ final class WeatherUi {
             t2.setText(Weather.temp(d.max) + " / " + Weather.temp(d.min));
             c.addView(t2, new LinearLayout.LayoutParams(-1, px(32)));
             TextView t3 = line(24, RAIN_TEXT, semibold);
-            t3.setText(d.wet() ? "Rain " + d.rain + "%" : "No rain");
+            t3.setText(rainy(d) ? "Rain " + d.rain + "%" : "No rain");
             c.addView(t3, new LinearLayout.LayoutParams(-1, px(32)));
-            c.setTag(d.wet());
+            c.setTag(rainy(d));
             c.setOnClickListener(v -> pick.at(which));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
             if (i > 0) lp.leftMargin = px(20);
